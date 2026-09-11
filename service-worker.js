@@ -1,7 +1,8 @@
-const CACHE = 'gelatos-lele-company-v27-cloud-login-first';
+const CACHE = 'gelatos-lele-company-v28-base-style';
 const ASSETS = [
   './',
   './index.html',
+  './styles-v11.css',
   './styles-v18.css',
   './business-core.js',
   './cloud-config.js',

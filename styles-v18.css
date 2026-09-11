@@ -1,4 +1,6 @@
-@import url("styles-v11.css");
+/* A base visual faz parte do aplicativo. Mantemos-a como arquivo separado para
+   o carregamento continuar leve, inclusive no celular. */
+@import url("styles-v11.css?v=28");
 
 :root {
   --info-bg: #f7e5e9;
