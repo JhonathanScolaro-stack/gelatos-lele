@@ -13,7 +13,7 @@
   let catalog = null;
   let quantities = {};
   let draft = { customer: '', mode: 'Retirada', zoneId: '', address: '', payment: 'Pix' };
-  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=25';
+  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=27';
 
   function legacyCatalog() {
     try {
