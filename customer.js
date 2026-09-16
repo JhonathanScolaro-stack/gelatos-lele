@@ -13,7 +13,12 @@
   let catalog = null;
   let quantities = {};
   let draft = { customer: '', mode: 'Retirada', zoneId: '', address: '', payment: 'Pix' };
-  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=27';
+  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=29';
+  // Apenas quem já entrou na gestão neste celular vê o atalho de volta.
+  // O cliente continua vendo exclusivamente o cardápio.
+  const managementBack = () => window.GelatosCloud?.hasSession?.()
+    ? '<button type="button" class="back-app" data-action="back-customer">← Gestão</button>'
+    : '';
 
   function legacyCatalog() {
     try {
@@ -66,15 +71,15 @@
     const pickupNotice = !result.delivery && String(catalog.pickupAddress || '').trim() ? '<section class="notice"><b>Endereço para retirada:</b><br>' + esc(catalog.pickupAddress).replace(/\n/g, '<br>') + '</section>' : '';
     const addressLabel = result.delivery ? 'Endereço de entrega / observação' : 'Observação para retirada (opcional)';
     const addressPlaceholder = result.delivery ? 'Informe o endereço completo e uma referência.' : 'Ex.: horário desejado para retirar.';
-    root.innerHTML = '<section class="hero"><button type="button" class="back-app" data-action="back-customer">← Voltar</button><h1>' + esc(catalog.brand || 'Gelatos Lele') + '</h1><p>' + esc(catalog.intro || 'Confira os sabores disponíveis.') + '</p></section>' +
+    root.innerHTML = '<section class="hero">' + managementBack() + '<h1>' + esc(catalog.brand || 'Gelatos Lele') + '</h1><p>' + esc(catalog.intro || 'Confira os sabores disponíveis.') + '</p></section>' +
       (catalog.address ? '<section class="notice"><b>Informações:</b><br>' + esc(catalog.address).replace(/\n/g, '<br>') + '</section>' : '') +
       pickupNotice +
       '<section class="products">' + (catalog.products.length ? catalog.products.map(product => '<article class="product">' + (product.image ? '<img src="' + esc(product.image) + '" alt="' + esc(product.name) + '">' : '<div class="image-placeholder"></div>') + '<div><h2>' + esc(product.name) + '</h2><p>' + esc(product.description || 'Geladinho artesanal.') + '</p><span class="price">' + money.format(num(product.price)) + ' · ' + product.available + ' disponível(is)</span><div class="quantity"><button data-change="' + esc(product.id) + ':-1" aria-label="Diminuir">−</button><b>' + quantities[product.id] + '</b><button data-change="' + esc(product.id) + ':1" aria-label="Aumentar">+</button></div></div></article>').join('') : '<p class="empty">Nenhum sabor disponível neste momento.</p>') + '</section>' +
       '<form id="customerOrder" class="panel"><h2>Finalizar pedido</h2><label>Seu nome<input name="customer" required value="' + esc(draft.customer) + '" placeholder="Ex.: Maria"></label><label>Forma de receber<select name="mode">' + modes.map(mode => '<option' + (mode === draft.mode ? ' selected' : '') + '>' + esc(mode) + '</option>').join('') + '</select></label>' + zoneField + '<label>' + addressLabel + '<textarea name="address" placeholder="' + addressPlaceholder + '">' + esc(draft.address) + '</textarea></label><label>Forma de pagamento<select name="payment"><option' + (draft.payment === 'Pix' ? ' selected' : '') + '>Pix</option><option' + (draft.payment === 'Dinheiro' ? ' selected' : '') + '>Dinheiro</option><option' + (draft.payment === 'Crédito' ? ' selected' : '') + '>Crédito</option><option' + (draft.payment === 'Débito' ? ' selected' : '') + '>Débito</option></select></label><div class="total total-breakdown"><span>Subtotal dos geladinhos</span><b>' + money.format(result.subtotal) + '</b><span>Frete' + (result.freeReason ? ' · ' + esc(result.freeReason) : '') + '</span><b>' + freightText + '</b><strong>Valor total</strong><strong>' + money.format(result.total) + '</strong></div><button class="primary">Confirmar pedido</button><p class="small">O pedido entra diretamente no sistema da Gelatos Lele e o estoque é reservado.</p></form>';
   }
   function confirmation(result) {
-    root.innerHTML = '<section class="hero"><button type="button" class="back-app" data-action="back-customer">← Voltar</button><h1>Pedido confirmado</h1><p>Recebemos seu pedido e reservamos os geladinhos selecionados.</p></section><section class="panel"><h2>Total: ' + money.format(num(result.total)) + '</h2><p>Pedido nº ' + esc(result.orderId) + '. A Gelatos Lele confirmará os próximos passos.</p><button class="primary" id="newOrder">Fazer outro pedido</button></section>';
-    document.getElementById('newOrder')?.addEventListener('click', () => start(catalog));
+    root.innerHTML = '<section class="hero">' + managementBack() + '<h1>Pedido confirmado</h1><p>Recebemos seu pedido e reservamos os geladinhos selecionados.</p></section><section class="panel"><h2>Total: ' + money.format(num(result.total)) + '</h2><p>Pedido nº ' + esc(result.orderId) + '. A Gelatos Lele confirmará os próximos passos.</p><button class="primary" id="newOrder">Fazer outro pedido</button></section>';
+    document.getElementById('newOrder')?.addEventListener('click', loadCatalog);
   }
   async function submitOrder() {
     const result = orderTotals();
@@ -85,6 +90,8 @@
     if (button) { button.disabled = true; button.textContent = 'Confirmando pedido…'; }
     try {
       const saved = await window.GelatosCloud.placeCustomerOrder({ customer: draft.customer.trim(), mode: draft.mode, zoneId: draft.zoneId, address: draft.address.trim(), payment: draft.payment, items: result.selected.map(product => ({ productId: product.id, quantity: quantities[product.id] })) });
+      // A reserva foi gravada de forma atômica no banco. Atualizamos também a
+      // tela já aberta, sem esperar o usuário fechar ou recarregar o cardápio.
       applyConfirmedStock();
       confirmation(saved);
     } catch (error) {

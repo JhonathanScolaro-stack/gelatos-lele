@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v28-base-style';
+const CACHE = 'gelatos-lele-company-v29-live-stock';
 const ASSETS = [
   './',
   './index.html',
@@ -24,6 +24,9 @@ self.addEventListener('activate', event => {
 });
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
+  // O catálogo e os pedidos vêm do Supabase. Nunca colocamos respostas do
+  // banco no cache do navegador: assim o próximo cliente vê o estoque real.
+  if (new URL(event.request.url).origin !== self.location.origin) return;
   event.respondWith(
     caches.match(event.request).then(cached => cached || fetch(event.request).then(response => {
       const copy = response.clone();

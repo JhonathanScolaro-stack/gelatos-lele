@@ -1,5 +1,8 @@
 window.GelatosCore = (() => {
   const round = value => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+  // Valores financeiros usam centavos. Estoque físico pode precisar de milésimos
+  // (por exemplo, 8,437 L ou kg), sem alterar o custo em reais.
+  const qty = value => Math.round((Number(value) + Number.EPSILON) * 1000) / 1000;
   const money = value => round(value || 0);
   const total = lines => money(lines.reduce((sum, line) => sum + money(line.total), 0));
   const UNIT = {
@@ -16,19 +19,19 @@ window.GelatosCore = (() => {
       if (unitKey(fromUnit) === unitKey(toUnit)) return Number(quantity);
       throw new Error('Unidades incompatíveis na receita: use ' + (toUnit || 'a unidade cadastrada no estoque') + '.');
     }
-    return round(Number(quantity) * from.factor / to.factor);
+    return qty(Number(quantity) * from.factor / to.factor);
   }
 
   function receivePurchase(stock, purchase) {
-    const qty = Number(purchase.quantity);
+    const purchasedQuantity = Number(purchase.quantity);
     const paid = money(purchase.totalPaid);
-    if (!(qty > 0) || !(paid >= 0)) throw new Error('Compra inválida.');
+    if (!(purchasedQuantity > 0) || !(paid >= 0)) throw new Error('Compra inválida.');
     const oldQty = Number(stock.quantity || 0);
     const oldAverage = money(stock.averageUnitCost || 0);
     return {
       ...stock,
-      quantity: round(oldQty + qty),
-      averageUnitCost: money((oldQty * oldAverage + paid) / (oldQty + qty)),
+      quantity: qty(oldQty + purchasedQuantity),
+      averageUnitCost: money((oldQty * oldAverage + paid) / (oldQty + purchasedQuantity)),
       lastPurchaseAt: purchase.date,
       lastPurchaseTotal: paid,
     };
@@ -62,7 +65,7 @@ window.GelatosCore = (() => {
     const consumed = Object.values(costing.lines.reduce((grouped, line) => {
       const supplyId = line.supplyId;
       const previous = grouped[supplyId] || { supplyId, quantity: 0, cost: 0 };
-      previous.quantity = round(previous.quantity + line.quantity * numberOfBatches);
+      previous.quantity = qty(previous.quantity + line.quantity * numberOfBatches);
       previous.cost = money(previous.cost + line.total * numberOfBatches);
       grouped[supplyId] = previous;
       return grouped;
@@ -73,7 +76,7 @@ window.GelatosCore = (() => {
     });
     return {
       consumed,
-      outputQuantity: round(Number(recipe.yieldUnits) * numberOfBatches),
+      outputQuantity: qty(Number(recipe.yieldUnits) * numberOfBatches),
       totalCost: money(costing.batchCost * numberOfBatches),
       unitCost: costing.unitCost,
     };
@@ -112,5 +115,5 @@ window.GelatosCore = (() => {
       profit: money(revenue - cost - operationalExpense), methods
     };
   }
-  return { money, receivePurchase, recipeCost, produce, validateOrder, financialSummary, convertQuantity };
+  return { money, quantity: qty, receivePurchase, recipeCost, produce, validateOrder, financialSummary, convertQuantity };
 })();

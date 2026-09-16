@@ -19,6 +19,10 @@
     return Number.isFinite(result) ? result : 0;
   };
   const round = value => Math.round((n(value) + Number.EPSILON) * 100) / 100;
+  // Dinheiro fica em centavos; quantidades físicas podem ter três casas.
+  const qty = value => Math.round((n(value) + Number.EPSILON) * 1000) / 1000;
+  const qtyText = value => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(qty(value));
+  const qtyInput = value => qty(value).toFixed(3).replace('.', ',');
   const money = value => moneyFormat.format(n(value));
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
   const brDate = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? String(value).slice(8, 10) + '/' + String(value).slice(5, 7) + '/' + String(value).slice(0, 4) : '—';
@@ -149,7 +153,8 @@
     editProduction: '',
     editSupplier: '',
     editExpense: '',
-    reportFilter: { start: '', end: '', min: '', max: '', query: '', payment: '', status: '' },
+    deliveryDraft: null,
+    reportFilter: { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '' },
     reportRanking: ''
   };
   // Cada endereço (Netlify, GitHub Pages etc.) possui seu próprio armazenamento do navegador.
@@ -263,7 +268,7 @@
       if (n(item.minimumStock) > 0 && n(item.quantity) <= n(item.minimumStock)) {
         const key = 'min-supply-' + item.id;
         active.push(key);
-        addNotice('stock', 'Estoque mínimo: ' + item.name, 'Restam ' + round(item.quantity) + ' ' + item.unit + '.', item.category === 'supply' ? 'stock-supply' : 'stock-ingredient', key);
+        addNotice('stock', 'Estoque mínimo: ' + item.name, 'Restam ' + qtyText(item.quantity) + ' ' + item.unit + '.', item.category === 'supply' ? 'stock-supply' : 'stock-ingredient', key);
       }
     });
     data.readyStock.forEach(item => {
@@ -309,14 +314,14 @@
     result.unitCost = round(result.totalCost / result.outputQuantity);
     result.consumed.forEach(line => {
       const item = supplies()[line.supplyId];
-      item.quantity = round(n(item.quantity) - n(line.quantity));
+      item.quantity = qty(n(item.quantity) - n(line.quantity));
       item.movements.push({ id: uid(), kind: correction ? 'Produção corrigida' : 'Produção', quantity: -n(line.quantity), total: n(line.cost), date });
     });
     let product = ready()[recipe.id];
     if (product) {
       const oldQty = n(product.quantity);
       product.unitCost = round((oldQty * n(product.unitCost) + n(result.outputQuantity) * n(result.unitCost)) / (oldQty + n(result.outputQuantity)));
-      product.quantity = round(oldQty + n(result.outputQuantity));
+      product.quantity = qty(oldQty + n(result.outputQuantity));
       product.saleUnitPrice = n(recipe.saleUnitPrice);
       product.movements.push({ id: uid(), kind: correction ? 'Produção corrigida' : 'Produção', quantity: n(result.outputQuantity), date });
     } else {
@@ -331,10 +336,10 @@
     (production.consumed || []).forEach(line => {
       const item = supplies()[line.supplyId];
       if (!item) return;
-      item.quantity = round(n(item.quantity) + n(line.quantity));
+      item.quantity = qty(n(item.quantity) + n(line.quantity));
       item.movements.push({ id: uid(), kind: 'Estorno de produção', quantity: n(line.quantity), total: 0, date: today() });
     });
-    const remaining = round(n(product.quantity) - n(production.outputQuantity));
+    const remaining = qty(n(product.quantity) - n(production.outputQuantity));
     const remainingValue = round(n(product.quantity) * n(product.unitCost) - n(production.outputQuantity) * n(production.unitCost));
     product.quantity = remaining;
     product.unitCost = remaining ? round(remainingValue / remaining) : 0;
@@ -353,7 +358,7 @@
       const [, kind, preset] = route.split(':');
       state.screen = 'reports-' + kind;
       state.reportRanking = preset === 'week' || preset === 'month' || preset === 'all' ? preset : '';
-      state.reportFilter = preset ? reportPreset(preset) : { start: '', end: '', min: '', max: '', query: '', payment: '', status: '' };
+      state.reportFilter = preset ? reportPreset(preset) : { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '' };
     } else if (route.startsWith('records:')) state.screen = 'records-' + route.split(':')[1];
     else if (route.startsWith('tools:')) state.screen = 'tools-' + route.split(':')[1];
     else if (route.startsWith('settings:')) state.screen = 'settings-' + route.split(':')[1];
@@ -362,7 +367,7 @@
     refreshFromCloud(true);
   }
   function reportPreset(preset) {
-    const filter = { start: '', end: '', min: '', max: '', query: '', payment: '', status: '' };
+    const filter = { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '' };
     const now = new Date();
     if (preset === 'today') filter.start = filter.end = today();
     if (preset === 'week') {
@@ -452,7 +457,7 @@
   }
   function orderLinesMarkup() {
     const products = data.readyStock.filter(item => n(item.quantity) > 0).map(item => ({ ...item, id: item.recipeId }));
-    return state.orderLines.map((line, index) => '<div class="order-line"><select data-order-product="' + index + '">' + options(products, line.productId, item => item.name + ' · ' + round(item.quantity) + ' un. · ' + money(item.saleUnitPrice)) + '</select><input data-order-quantity="' + index + '" inputmode="decimal" value="' + esc(line.quantity) + '" aria-label="Quantidade"><button type="button" class="line-remove" data-action="remove-order-line" data-index="' + index + '" aria-label="Remover item">×</button></div>').join('');
+    return state.orderLines.map((line, index) => '<div class="order-line"><select data-order-product="' + index + '">' + options(products, line.productId, item => item.name + ' · ' + qtyText(item.quantity) + ' un. · ' + money(item.saleUnitPrice)) + '</select><input data-order-quantity="' + index + '" inputmode="decimal" value="' + esc(line.quantity) + '" aria-label="Quantidade"><button type="button" class="line-remove" data-action="remove-order-line" data-index="' + index + '" aria-label="Remover item">×</button></div>').join('');
   }
   function draftOrderTotal() {
     return round(state.orderLines.reduce((sum, line) => {
@@ -517,14 +522,14 @@
     const category = state.screen === 'stock-supply' ? 'supply' : 'ingredient';
     const label = category === 'supply' ? 'Estoque de insumos' : 'Estoque de ingredientes';
     const cards = data.supplies.filter(item => item.category === category).sort((a, b) => a.name.localeCompare(b.name)).map(item => {
-      const moves = item.movements.slice(-8).reverse().map(move => '<li>' + brDate(move.date) + ' · ' + esc(move.kind) + ' · ' + (n(move.quantity) >= 0 ? '+' : '') + round(move.quantity) + ' ' + esc(item.unit) + '</li>').join('') || '<li>Sem movimentações.</li>';
-      return detail(item.name, 'Quantidade: ' + round(item.quantity) + ' ' + esc(item.unit) + ' · mínimo: ' + round(item.minimumStock), money(item.averageUnitCost) + '/' + esc(item.unit), n(item.minimumStock) > 0 && n(item.quantity) <= n(item.minimumStock) ? 'mínimo' : 'em estoque', '<dl><dt>Quantidade atual</dt><dd>' + round(item.quantity) + ' ' + esc(item.unit) + '</dd><dt>Custo médio</dt><dd>' + money(item.averageUnitCost) + ' / ' + esc(item.unit) + '</dd><dt>Valor em estoque</dt><dd>' + money(n(item.quantity) * n(item.averageUnitCost)) + '</dd><dt>Última compra</dt><dd>' + brDate(item.lastPurchaseAt) + '</dd><dt>Fornecedor</dt><dd>' + esc(item.lastSupplierName || '—') + '</dd></dl><h4>Movimentações recentes</h4><ul>' + moves + '</ul><div class="details-actions"><button class="outline" data-action="edit-supply" data-id="' + esc(item.id) + '">Editar</button><button class="outline danger-button" data-action="delete-supply" data-id="' + esc(item.id) + '">Excluir</button></div>');
+      const moves = item.movements.slice(-8).reverse().map(move => '<li>' + brDate(move.date) + ' · ' + esc(move.kind) + ' · ' + (n(move.quantity) >= 0 ? '+' : '') + qtyText(move.quantity) + ' ' + esc(item.unit) + '</li>').join('') || '<li>Sem movimentações.</li>';
+      return detail(item.name, 'Quantidade: ' + qtyText(item.quantity) + ' ' + esc(item.unit) + ' · mínimo: ' + qtyText(item.minimumStock), money(item.averageUnitCost) + '/' + esc(item.unit), n(item.minimumStock) > 0 && n(item.quantity) <= n(item.minimumStock) ? 'mínimo' : 'em estoque', '<dl><dt>Quantidade atual</dt><dd>' + qtyText(item.quantity) + ' ' + esc(item.unit) + '</dd><dt>Custo médio</dt><dd>' + money(item.averageUnitCost) + ' / ' + esc(item.unit) + '</dd><dt>Valor em estoque</dt><dd>' + money(n(item.quantity) * n(item.averageUnitCost)) + '</dd><dt>Última compra</dt><dd>' + brDate(item.lastPurchaseAt) + '</dd><dt>Fornecedor</dt><dd>' + esc(item.lastSupplierName || '—') + '</dd></dl><h4>Movimentações recentes</h4><ul>' + moves + '</ul><div class="details-actions"><button class="outline" data-action="edit-supply" data-id="' + esc(item.id) + '">Editar</button><button class="outline danger-button" data-action="delete-supply" data-id="' + esc(item.id) + '">Excluir</button></div>');
     }).join('') || empty('Nenhum item cadastrado.');
     return '<section class="screen active">' + heading('Controle de estoque', label, 'Toque em um item para conferir movimentações ou editar todas as informações.') + '<div class="isolated-actions"><button class="primary" data-route="stock:purchase">Cadastrar nova compra</button></div><div class="list">' + cards + '</div></section>';
   }
   function purchaseScreen() {
     return '<section class="screen active">' + heading('Controle de estoque', 'Cadastrar compra', 'Registre a entrada uma vez. O custo médio e o financeiro são atualizados automaticamente.') + '<form id="purchaseForm" class="panel form-panel"><div class="form-grid two">' +
-      field('Item já cadastrado', '<select name="supplyId">' + options(data.supplies.slice().sort((a, b) => a.name.localeCompare(b.name)), '', item => item.name + ' (' + round(item.quantity) + ' ' + item.unit + ')') + '</select>', 'Selecione aqui quando estiver comprando novamente algo que já existe.') +
+      field('Item já cadastrado', '<select name="supplyId">' + options(data.supplies.slice().sort((a, b) => a.name.localeCompare(b.name)), '', item => item.name + ' (' + qtyText(item.quantity) + ' ' + item.unit + ')') + '</select>', 'Selecione aqui quando estiver comprando novamente algo que já existe.') +
       field('Ou nome do novo item', '<input name="newName" placeholder="Ex.: Leite integral">', 'Preencha somente se este item ainda não foi cadastrado.') +
       field('Tipo do novo item', '<select name="category"><option value="ingredient">Ingrediente</option><option value="supply">Insumo / embalagem</option></select>') +
       field('Unidade de medida', '<select name="unit"><option>un.</option><option>pacote</option><option>L</option><option>ml</option><option>kg</option><option>g</option><option>rolo</option><option>caixa</option></select>') +
@@ -561,9 +566,9 @@
       field('Nome', '<input name="name" required value="' + esc(item.name) + '">') +
       field('Tipo', '<select name="category"><option value="ingredient"' + (item.category === 'ingredient' ? ' selected' : '') + '>Ingrediente</option><option value="supply"' + (item.category === 'supply' ? ' selected' : '') + '>Insumo / embalagem</option></select>') +
       field('Unidade de medida', '<input name="unit" required value="' + esc(item.unit) + '">') +
-      field('Quantidade atual', '<input name="quantity" required inputmode="decimal" value="' + esc(String(item.quantity).replace('.', ',')) + '">', 'Quantidade física que existe agora.') +
+      field('Quantidade atual', '<input name="quantity" required inputmode="decimal" value="' + esc(qtyInput(item.quantity)) + '">', 'Quantidade física que existe agora. Ingredientes e insumos aceitam três casas decimais.') +
       field('Custo médio por unidade (R$)', '<input name="averageUnitCost" required inputmode="decimal" value="' + esc(String(item.averageUnitCost).replace('.', ',')) + '">', 'Custo usado para calcular a receita a partir de agora.') +
-      field('Estoque mínimo', '<input name="minimumStock" inputmode="decimal" value="' + esc(String(item.minimumStock).replace('.', ',')) + '">') +
+      field('Estoque mínimo', '<input name="minimumStock" inputmode="decimal" value="' + esc(qtyInput(item.minimumStock)) + '">') +
       field('Data da última compra', '<input name="lastPurchaseAt" type="date" value="' + esc(item.lastPurchaseAt || '') + '">') +
       field('Fornecedor da última compra', '<input name="lastSupplierName" value="' + esc(item.lastSupplierName || '') + '">') +
       '</div><div class="button-row"><button class="primary">Salvar todas as alterações</button><button class="outline" type="button" data-route="stock:' + (item.category === 'supply' ? 'supply' : 'ingredient') + '">Cancelar</button><button class="outline danger-button" type="button" data-action="delete-supply" data-id="' + esc(item.id) + '">Excluir cadastro</button></div></form></section>';
@@ -705,6 +710,13 @@
       metric('Lucro real', 'financeProfit', 'Receita − custo − despesas', 'reports:finance', true) +
       '</div><section class="panel balance-panel"><h2>Saldo por forma de pagamento</h2><div class="payment-balances"><span>Dinheiro <b>' + money(balances.Dinheiro) + '</b></span><span>Pix / conta <b>' + money(balances.Pix) + '</b></span><span>Crédito <b>' + money(balances.Crédito) + '</b></span><span>Débito <b>' + money(balances.Débito) + '</b></span></div></section><section class="panel"><p class="form-note">Resultado atual: faturamento ' + money(summary.revenue) + ' − custo vendido ' + money(summary.cost) + ' − despesas operacionais ' + money(summary.expense) + '.</p></section></section>';
   }
+  function orderDestination(order) {
+    const mode = String(order.deliveryMode || order.mode || '').trim();
+    const zone = String(order.deliveryZone || order.zoneName || '').trim();
+    if (mode.toLocaleLowerCase('pt-BR').includes('entrega')) return zone || 'Entrega sem local informado';
+    if (mode.toLocaleLowerCase('pt-BR').includes('retirada')) return 'Retirada';
+    return zone || 'Não informado';
+  }
   function reportRows(kind) {
     const query = String(state.reportFilter.query || '').toLocaleLowerCase('pt-BR');
     const min = n(state.reportFilter.min);
@@ -715,10 +727,14 @@
       if (n(row.value) < min || n(row.value) > max) return false;
       if (state.reportFilter.payment && row.payment !== state.reportFilter.payment) return false;
       if (state.reportFilter.status && row.status !== state.reportFilter.status) return false;
+      if (state.reportFilter.location && row.location !== state.reportFilter.location) return false;
       return !query || String(row.search || '').toLocaleLowerCase('pt-BR').includes(query);
     };
     let rows = [];
-    if (kind === 'orders') rows = data.orders.map(order => ({ date: day(order.date), name: order.customer, items: order.items.map(line => line.productName).join(', '), payment: order.paymentMethod, status: orderStatus(order), value: n(order.total), search: order.customer + ' ' + order.items.map(line => line.productName).join(' ') }));
+    if (kind === 'orders') rows = data.orders.map(order => {
+      const location = orderDestination(order);
+      return { date: day(order.date), name: order.customer, items: order.items.map(line => line.productName).join(', '), payment: order.paymentMethod, status: orderStatus(order), location, address: String(order.address || '').trim(), value: n(order.total), search: order.customer + ' ' + location + ' ' + String(order.address || '') + ' ' + order.items.map(line => line.productName).join(' ') };
+    });
     if (kind === 'finance') rows = data.orders.filter(order => order.status === 'paid').map(order => ({ date: day(order.paidAt || order.date), name: order.customer, type: 'Entrada', payment: order.paymentMethod, status: 'pago', value: n(order.total), cost: n(order.cost), search: order.customer + ' ' + order.items.map(line => line.productName).join(' ') })).concat(data.expenses.map(item => ({ date: day(item.date), name: item.name, type: 'Saída', payment: item.paymentMethod, status: item.category === 'purchase' ? 'compra' : 'paga', value: -n(item.total), cost: 0, search: item.name })));
     if (kind === 'stock') {
       data.supplies.forEach(item => item.movements.forEach(move => rows.push({ date: day(move.date), name: item.name, type: move.kind, quantity: n(move.quantity), unit: item.unit, payment: move.paymentMethod || '', status: '', value: n(move.total), search: item.name + ' ' + move.kind })));
@@ -727,7 +743,7 @@
     return rows.filter(matches).sort((a, b) => String(b.date).localeCompare(String(a.date)));
   }
   function reportCard(row, kind) {
-    if (kind === 'orders') return detail(row.name, brDate(row.date) + ' · ' + esc(row.payment), money(row.value), row.status, '<p>' + esc(row.items) + '</p>');
+    if (kind === 'orders') return detail(row.name, brDate(row.date) + ' · ' + esc(row.payment), money(row.value), row.status, '<p>' + esc(row.items) + '</p><p><b>Entrega / retirada:</b> ' + esc(row.location) + (row.address ? '<br><b>Endereço:</b> ' + esc(row.address).replace(/\n/g, '<br>') : '') + '</p>');
     if (kind === 'finance') return detail(row.name, brDate(row.date) + ' · ' + esc(row.payment), (row.value < 0 ? '− ' : '+ ') + money(Math.abs(row.value)), row.type.toLocaleLowerCase('pt-BR'), '<p>' + esc(row.type) + '</p>');
     return detail(row.name, brDate(row.date) + ' · ' + esc(row.type), (row.quantity >= 0 ? '+ ' : '− ') + Math.abs(row.quantity) + ' ' + esc(row.unit), 'estoque', '<p>Valor lançado: ' + money(row.value) + '</p>');
   }
@@ -737,7 +753,9 @@
     let totalText = '', headings = [];
     if (kind === 'orders') {
       totalText = 'Pedidos: <b>' + rows.length + '</b> · valor: <b>' + money(rows.reduce((sum, row) => sum + row.value, 0)) + '</b> · recebidos: <b>' + money(rows.filter(row => row.status === 'pago').reduce((sum, row) => sum + row.value, 0)) + '</b>';
-      headings = ['Data', 'Cliente', 'Itens', 'Pagamento', 'Situação', 'Valor'];
+      const destinations = Object.entries(rows.reduce((all, row) => { all[row.location] = (all[row.location] || 0) + 1; return all; }, {})).sort((a, b) => b[1] - a[1]).slice(0, 3);
+      if (destinations.length) totalText += '<br><span class="report-destinations">Mais pedidos por local: <b>' + destinations.map(item => esc(item[0]) + ' (' + item[1] + ')').join(' · ') + '</b></span>';
+      headings = ['Data', 'Cliente', 'Itens', 'Entrega / retirada', 'Pagamento', 'Situação', 'Valor'];
     } else if (kind === 'finance') {
       const inValue = rows.filter(row => row.value > 0).reduce((sum, row) => sum + row.value, 0);
       const outValue = rows.filter(row => row.value < 0).reduce((sum, row) => sum + Math.abs(row.value), 0);
@@ -758,8 +776,9 @@
       field('Valor mínimo', '<input data-filter="min" inputmode="decimal" value="' + esc(f.min) + '">') +
       field('Valor máximo', '<input data-filter="max" inputmode="decimal" value="' + esc(f.max) + '">') +
       field('Pagamento', '<select data-filter="payment"><option value="">Todos</option>' + METHODS.map(method => '<option' + (f.payment === method ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') +
+      (kind === 'orders' ? field('Entrega / retirada', '<select data-filter="location"><option value="">Todos os locais</option>' + Array.from(new Set(data.orders.map(orderDestination))).sort((a, b) => a.localeCompare(b, 'pt-BR')).map(location => '<option value="' + esc(location) + '"' + (f.location === location ? ' selected' : '') + '>' + esc(location) + '</option>').join('') + '</select>') : '') +
       field('Situação', '<select data-filter="status"><option value="">Todas</option><option value="pendente"' + (f.status === 'pendente' ? ' selected' : '') + '>Pendente</option><option value="pago"' + (f.status === 'pago' ? ' selected' : '') + '>Pago</option><option value="cancelado"' + (f.status === 'cancelado' ? ' selected' : '') + '>Cancelado</option></select>') +
-      field('Buscar', '<input class="filter-search" data-filter="query" value="' + esc(f.query) + '" placeholder="Cliente, sabor, fornecedor...">') +
+      field('Buscar', '<input class="filter-search" data-filter="query" value="' + esc(f.query) + '" placeholder="Cliente, local, sabor, fornecedor...">') +
       '<button class="outline" type="button" data-action="clear-filter">Limpar</button><button class="secondary" type="button" data-action="export-xlsx">Baixar Excel</button></div><div class="panel report-summary">' + totalText + '</div><div class="list">' + (rows.map(row => reportCard(row, kind)).join('') || empty('Nenhum resultado encontrado.')) + '</div></section>';
   }
   function catalogScreen() {
@@ -805,6 +824,39 @@
     }
     return '<section class="screen active">' + heading('Ferramentas', 'Comparar preço', 'Compare o preço visto no mercado com suas compras registradas.') + '<form id="compareForm" class="panel form-panel"><div class="form-grid two">' + field('Item', '<select name="supplyId">' + options(data.supplies, state.compareSupply || '') + '</select>') + field('Preço visto (R$)', '<input name="unitPrice" inputmode="decimal" value="' + esc(state.comparePrice || '') + '">', 'Preço de uma unidade na mesma unidade cadastrada no estoque.') + '</div><button class="primary full">Comparar preço</button></form><div class="comparison-result">' + result + '</div></section>';
   }
+  function deliveryZoneRows(value) {
+    return String(value || '').split(/\r?\n/).map(line => {
+      const [city, ...feeParts] = line.split('|');
+      return { city: String(city || '').trim(), fee: feeParts.join('|').trim() };
+    }).filter(row => row.city || row.fee);
+  }
+  function defaultDeliveryDraft() {
+    return {
+      deliveryModes: data.settings.deliveryModes || 'Retirada,Entrega',
+      pickupAddress: data.settings.pickupAddress || '',
+      freeDeliveryMinValue: data.settings.freeDeliveryMinValue || '',
+      freeDeliveryMinItems: data.settings.freeDeliveryMinItems || '',
+      zones: deliveryZoneRows(data.settings.deliveryZones)
+    };
+  }
+  function deliveryDraftFromForm(form) {
+    if (!form) return state.deliveryDraft || defaultDeliveryDraft();
+    const f = form.elements;
+    return {
+      deliveryModes: f.deliveryModes.value,
+      pickupAddress: f.pickupAddress.value,
+      freeDeliveryMinValue: f.freeDeliveryMinValue.value,
+      freeDeliveryMinItems: f.freeDeliveryMinItems.value,
+      zones: Array.from(form.querySelectorAll('[data-delivery-zone]')).map(row => ({
+        city: row.querySelector('[data-zone-city]')?.value.trim() || '',
+        fee: row.querySelector('[data-zone-fee]')?.value.trim() || ''
+      }))
+    };
+  }
+  function deliveryZoneFields(draft) {
+    const rows = draft.zones.length ? draft.zones : [{ city: '', fee: '' }];
+    return '<section class="delivery-zones"><h2>Locais e taxas de frete</h2><p class="form-note">Cadastre cada cidade ou bairro e o valor. O cliente escolhe um dos locais no cardápio.</p>' + rows.map((row, index) => '<div class="delivery-zone-row" data-delivery-zone><label>Cidade ou bairro<input data-zone-city="' + index + '" value="' + esc(row.city) + '" placeholder="Ex.: Águas do Centro"></label><label>Valor do frete (R$)<input data-zone-fee="' + index + '" inputmode="decimal" value="' + esc(row.fee) + '" placeholder="Ex.: 5,00"></label><button class="line-remove" type="button" data-action="remove-delivery-zone" data-index="' + index + '" aria-label="Remover local">×</button></div>').join('') + '<button class="outline full" type="button" data-action="add-delivery-zone">+ Adicionar cidade ou bairro</button></section>';
+  }
   function settingsScreen() {
     const section = state.screen.replace('settings-', '');
     if (section === 'cloud') {
@@ -835,12 +887,13 @@
         '<button class="primary full">Salvar informações do cardápio</button></form><section class="panel"><h2>Link para enviar ao cliente</h2><p>O link mostra somente os sabores ativos cadastrados no Cardápio que têm estoque produzido.</p><div class="customer-link"><input readonly value="' + esc(link) + '"><button class="secondary" type="button" data-action="copy-catalog-link">Copiar link</button></div><p class="form-note">Com a nuvem ativada, o pedido do cliente entra diretamente nos pedidos e reserva o estoque na mesma hora.</p></section></section>';
     }
     if (section === 'delivery') {
+      const draft = state.deliveryDraft || (state.deliveryDraft = defaultDeliveryDraft());
       return '<section class="screen active">' + heading('Configurações', 'Frete e entrega', 'Crie os locais de entrega e o respectivo frete. O cliente escolhe um local no cardápio e o total é calculado na hora.') + '<form id="deliverySettingsForm" class="panel form-panel">' +
-        field('Formas de receber', '<input name="deliveryModes" value="' + esc(data.settings.deliveryModes || 'Retirada,Entrega') + '">', 'Separe as opções por vírgula. Ex.: Retirada,Entrega.') +
-        field('Endereço para retirada', '<textarea name="pickupAddress" rows="3" placeholder="Ex.: Rua das Flores, 123 — Centro">' + esc(data.settings.pickupAddress || '') + '</textarea>', 'Aparece ao cliente somente quando ele escolher Retirada. Inclua endereço, horário e ponto de referência se desejar.') +
-        field('Locais e taxas de frete', '<textarea name="deliveryZones" rows="7" placeholder="Centro | 5,00&#10;Jardim das Flores | 7,00&#10;Bairro Novo | 10,00">' + esc(data.settings.deliveryZones || '') + '</textarea>', 'Uma linha por local. Escreva o nome do local, depois a barra vertical | e o valor do frete. Ex.: Centro | 5,00.') +
-        field('Frete grátis acima de valor (R$)', '<input name="freeDeliveryMinValue" inputmode="decimal" value="' + esc(data.settings.freeDeliveryMinValue || '') + '" placeholder="Ex.: 50,00">', 'Deixe em branco se não quiser esta regra. O frete fica grátis quando o subtotal dos geladinhos atingir este valor.') +
-        field('Frete grátis acima de quantidade', '<input name="freeDeliveryMinItems" inputmode="decimal" value="' + esc(data.settings.freeDeliveryMinItems || '') + '" placeholder="Ex.: 10">', 'Deixe em branco se não quiser esta regra. O frete fica grátis quando a quantidade total atingir este número.') +
+        field('Formas de receber', '<input name="deliveryModes" value="' + esc(draft.deliveryModes) + '">', 'Separe as opções por vírgula. Ex.: Retirada,Entrega.') +
+        field('Endereço para retirada', '<textarea name="pickupAddress" rows="3" placeholder="Ex.: Rua das Flores, 123 — Centro">' + esc(draft.pickupAddress) + '</textarea>', 'Aparece ao cliente somente quando ele escolher Retirada. Inclua endereço, horário e ponto de referência se desejar.') +
+        deliveryZoneFields(draft) +
+        field('Frete grátis acima de valor (R$)', '<input name="freeDeliveryMinValue" inputmode="decimal" value="' + esc(draft.freeDeliveryMinValue) + '" placeholder="Ex.: 50,00">', 'Deixe em branco se não quiser esta regra. O frete fica grátis quando o subtotal dos geladinhos atingir este valor.') +
+        field('Frete grátis acima de quantidade', '<input name="freeDeliveryMinItems" inputmode="decimal" value="' + esc(draft.freeDeliveryMinItems) + '" placeholder="Ex.: 10">', 'Deixe em branco se não quiser esta regra. O frete fica grátis quando a quantidade total atingir este número.') +
         '<button class="primary full">Salvar frete e entrega</button></form><section class="panel"><h2>Como o cliente verá</h2><p>Ao escolher Entrega, ele seleciona o local e vê subtotal, frete e total antes de enviar o pedido.</p></section></section>';
     }
     if (section === 'backup') {
@@ -878,7 +931,7 @@
   }
   function catalogLink() {
     try {
-      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=26';
+      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=29';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -944,7 +997,7 @@
   function orderLines() {
     const grouped = {};
     state.orderLines.forEach(line => {
-      if (line.productId && n(line.quantity) > 0) grouped[line.productId] = round((grouped[line.productId] || 0) + n(line.quantity));
+      if (line.productId && n(line.quantity) > 0) grouped[line.productId] = qty((grouped[line.productId] || 0) + n(line.quantity));
     });
     return Object.entries(grouped).map(([productId, quantity]) => ({ productId, quantity, saleUnitPrice: n(ready()[productId]?.saleUnitPrice) }));
   }
@@ -952,7 +1005,7 @@
     const result = window.GelatosCore.validateOrder(lines, ready());
     result.lines.forEach(line => {
       const product = ready()[line.productId];
-      product.quantity = round(n(product.quantity) - n(line.quantity));
+      product.quantity = qty(n(product.quantity) - n(line.quantity));
       product.movements.push({ id: uid(), kind, quantity: -n(line.quantity), date });
     });
     return result;
@@ -961,7 +1014,7 @@
     order.items.forEach(line => {
       const product = ready()[line.productId];
       if (!product) return;
-      product.quantity = round(n(product.quantity) + n(line.quantity));
+      product.quantity = qty(n(product.quantity) + n(line.quantity));
       product.movements.push({ id: uid(), kind, quantity: n(line.quantity), date });
     });
   }
@@ -1033,7 +1086,7 @@
     const supplier = data.suppliers.find(entry => String(entry.id) === String(f.supplierId.value));
     const oldQuantity = n(item.quantity);
     const unitPrice = round(total / quantity);
-    item.quantity = round(oldQuantity + quantity);
+    item.quantity = qty(oldQuantity + quantity);
     item.averageUnitCost = round((oldQuantity * n(item.averageUnitCost) + total) / (oldQuantity + quantity));
     item.lastPurchaseAt = date;
     item.lastPurchaseTotal = total;
@@ -1054,7 +1107,7 @@
       return;
     }
     const quantity = Math.max(0, n(f.quantity.value));
-    const difference = round(quantity - n(item.quantity));
+    const difference = qty(quantity - n(item.quantity));
     if (difference) item.movements.push({ id: uid(), kind: 'Ajuste manual', quantity: difference, total: 0, date: today() });
     Object.assign(item, { name: control(form, 'name').value.trim(), category: f.category.value, unit: f.unit.value.trim(), quantity, averageUnitCost: Math.max(0, n(f.averageUnitCost.value)), minimumStock: Math.max(0, n(f.minimumStock.value)), lastPurchaseAt: f.lastPurchaseAt.value, lastSupplierName: f.lastSupplierName.value.trim() });
     state.editSupply = '';
@@ -1067,7 +1120,7 @@
     const item = ready()[f.recipeId.value];
     if (!item) return;
     const quantity = Math.max(0, n(f.quantity.value));
-    const difference = round(quantity - n(item.quantity));
+    const difference = qty(quantity - n(item.quantity));
     if (difference) item.movements.push({ id: uid(), kind: 'Ajuste manual', quantity: difference, date: today() });
     Object.assign(item, { quantity, unitCost: Math.max(0, n(f.unitCost.value)), saleUnitPrice: Math.max(0, n(f.saleUnitPrice.value)), minimumStock: Math.max(0, n(f.minimumStock.value)) });
     state.editReady = '';
@@ -1180,7 +1233,7 @@
     if (product) {
       const oldQuantity = n(product.quantity);
       product.unitCost = round((oldQuantity * n(product.unitCost) + quantity * unitCost) / (oldQuantity + quantity));
-      product.quantity = round(oldQuantity + quantity);
+      product.quantity = qty(oldQuantity + quantity);
       product.saleUnitPrice = n(recipe.saleUnitPrice);
       product.minimumStock = n(f.minimumStock.value) || n(product.minimumStock);
       product.movements.push({ id: uid(), kind: 'Cadastro manual', quantity, date });
@@ -1245,19 +1298,24 @@
     navigate('settings:catalog');
   }
   function saveDeliverySettings(form) {
-    const f = form.elements;
-    const zones = deliveryZones(f.deliveryZones.value);
-    if (String(f.deliveryModes.value || '').toLocaleLowerCase('pt-BR').includes('entrega') && !zones.length) {
+    const draft = deliveryDraftFromForm(form);
+    const zones = draft.zones.filter(zone => zone.city);
+    if (zones.some(zone => !String(zone.fee).trim())) {
+      toast('Informe o valor do frete de cada cidade ou bairro cadastrado.');
+      return;
+    }
+    if (String(draft.deliveryModes || '').toLocaleLowerCase('pt-BR').includes('entrega') && !zones.length) {
       toast('Cadastre pelo menos um local e sua taxa de frete para usar Entrega.');
       return;
     }
     Object.assign(data.settings, {
-      deliveryModes: f.deliveryModes.value.trim() || 'Retirada,Entrega',
-      pickupAddress: f.pickupAddress.value.trim(),
-      deliveryZones: f.deliveryZones.value.trim(),
-      freeDeliveryMinValue: f.freeDeliveryMinValue.value.trim(),
-      freeDeliveryMinItems: f.freeDeliveryMinItems.value.trim()
+      deliveryModes: draft.deliveryModes.trim() || 'Retirada,Entrega',
+      pickupAddress: draft.pickupAddress.trim(),
+      deliveryZones: zones.map(zone => zone.city.trim() + ' | ' + n(zone.fee).toFixed(2).replace('.', ',')).join('\n'),
+      freeDeliveryMinValue: draft.freeDeliveryMinValue.trim(),
+      freeDeliveryMinItems: draft.freeDeliveryMinItems.trim()
     });
+    state.deliveryDraft = null;
     save();
     toast('Frete e opções de entrega atualizados.');
     navigate('settings:delivery');
@@ -1515,7 +1573,7 @@
     const kind = state.screen.replace('reports-', '');
     const rows = state.exportRows || [];
     const contentRows = rows.map(row => kind === 'orders'
-      ? [brDate(row.date), row.name, row.items, row.payment, row.status, row.value]
+      ? [brDate(row.date), row.name, row.items, row.location, row.payment, row.status, row.value]
       : kind === 'finance'
         ? [brDate(row.date), row.name, row.type, row.payment, row.value]
         : [brDate(row.date), row.name, row.type, (row.quantity >= 0 ? '+ ' : '− ') + Math.abs(row.quantity) + ' ' + row.unit, row.value]);
@@ -1564,6 +1622,19 @@
     }
     if (action === 'info') { state.info = { title: actionNode.dataset.infoTitle || 'Informação', text: actionNode.dataset.infoText || '' }; render(); return; }
     if (action === 'close-info') { state.info = null; render(); return; }
+    if (action === 'add-delivery-zone') {
+      state.deliveryDraft = deliveryDraftFromForm($('#deliverySettingsForm'));
+      state.deliveryDraft.zones.push({ city: '', fee: '' });
+      const index = state.deliveryDraft.zones.length - 1;
+      render({ preserveScroll: true, focusSelector: '[data-zone-city="' + index + '"]' });
+      return;
+    }
+    if (action === 'remove-delivery-zone') {
+      state.deliveryDraft = deliveryDraftFromForm($('#deliverySettingsForm'));
+      state.deliveryDraft.zones.splice(n(actionNode.dataset.index), 1);
+      render({ preserveScroll: true });
+      return;
+    }
     if (action === 'add-order-line') { rememberOrderDraft(); state.orderLines.push({ productId: '', quantity: 1 }); render(); return; }
     if (action === 'remove-order-line') { state.orderLines.splice(n(actionNode.dataset.index), 1); if (!state.orderLines.length) state.orderLines.push({ productId: '', quantity: 1 }); render(); return; }
     if (action === 'edit-order') {
@@ -1601,7 +1672,7 @@
     if (action === 'delete-expense') { deleteExpense(id); return; }
     if (action === 'edit-supplier') { state.editSupplier = id; state.screen = 'supplier-edit'; render(); return; }
     if (action === 'delete-supplier') { deleteSupplier(id); return; }
-    if (action === 'clear-filter') { state.reportFilter = { start: '', end: '', min: '', max: '', query: '', payment: '', status: '' }; render(); return; }
+    if (action === 'clear-filter') { state.reportFilter = { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '' }; render(); return; }
     if (action === 'export-xlsx') { exportXlsx(); return; }
     if (action === 'copy-catalog-link') { copyCatalogLink(); return; }
     if (action === 'cloud-refresh') { forceCloudRefresh(); return; }

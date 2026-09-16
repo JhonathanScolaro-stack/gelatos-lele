@@ -1,6 +1,6 @@
 /* A base visual faz parte do aplicativo. Mantemos-a como arquivo separado para
    o carregamento continuar leve, inclusive no celular. */
-@import url("styles-v11.css?v=28");
+@import url("styles-v11.css?v=29");
 
 :root {
   --info-bg: #f7e5e9;
@@ -207,6 +207,64 @@
   margin-top: 8px;
 }
 
+.delivery-zones {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.delivery-zones h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.delivery-zones .form-note {
+  margin: -4px 0 0;
+}
+
+.delivery-zone-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(105px, .72fr) 43px;
+  gap: 8px;
+  align-items: end;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff6f7;
+}
+
+.delivery-zone-row label {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.delivery-zone-row input {
+  width: 100%;
+  min-width: 0;
+  margin-top: 5px;
+}
+
+.line-remove {
+  display: grid;
+  width: 43px;
+  min-height: 43px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #e8aeb9;
+  border-radius: 12px;
+  background: #fff;
+  color: #a33c50;
+  font-size: 25px;
+  line-height: 1;
+}
+
+.report-destinations {
+  display: inline-block;
+  margin-top: 6px;
+}
+
 @media (max-width: 420px) {
   .form-grid.two,
   .filters {
@@ -219,5 +277,9 @@
 
   .customer-link button {
     width: 100%;
+  }
+
+  .delivery-zone-row {
+    grid-template-columns: minmax(0, 1fr) minmax(92px, .72fr) 43px;
   }
 }
