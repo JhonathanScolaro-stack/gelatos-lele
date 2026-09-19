@@ -1,6 +1,6 @@
 /* A base visual faz parte do aplicativo. Mantemos-a como arquivo separado para
    o carregamento continuar leve, inclusive no celular. */
-@import url("styles-v11.css?v=29");
+@import url("styles-v11.css?v=30");
 
 :root {
   --info-bg: #f7e5e9;
@@ -265,6 +265,119 @@
   margin-top: 6px;
 }
 
+.recipe-cost-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 16px 0 2px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.recipe-cost-summary > div {
+  display: grid;
+  gap: 3px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff8f8;
+}
+
+.recipe-cost-summary span,
+.recipe-cost-summary small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.recipe-cost-summary b {
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.recipe-cost-summary .recipe-profit {
+  grid-column: 1 / -1;
+  background: linear-gradient(145deg, #fff0f2, #fff9f8);
+  border-color: #edbdc7;
+}
+
+.recipe-cost-summary .recipe-profit b {
+  color: var(--pink-dark);
+  font-size: 19px;
+}
+
+.recipe-cost-summary > small {
+  grid-column: 1 / -1;
+  padding: 2px 2px 0;
+}
+
+.recipe-cost-summary.view {
+  margin: 0 0 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fff;
+}
+
+.recipe-view-image {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  border-radius: 15px;
+  object-fit: cover;
+  background: #fff2f3;
+}
+
+.recipe-view-description,
+.recipe-preparation {
+  color: var(--muted);
+}
+
+.recipe-view dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 7px 12px;
+  margin: 14px 0 0;
+}
+
+.recipe-view dt {
+  color: var(--muted);
+}
+
+.recipe-view dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 800;
+}
+
+.recipe-view-items {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recipe-view-items li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 11px;
+  background: #fff6f7;
+}
+
+.recipe-view-items li span {
+  color: var(--muted);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.recipe-card-profit {
+  margin: 10px 0;
+  color: var(--pink-dark);
+  font-size: 12px;
+}
+
 @media (max-width: 420px) {
   .form-grid.two,
   .filters {
@@ -281,5 +394,27 @@
 
   .delivery-zone-row {
     grid-template-columns: minmax(0, 1fr) minmax(92px, .72fr) 43px;
+  }
+
+  .recipe-cost-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .recipe-cost-summary .recipe-profit {
+    grid-column: auto;
+  }
+
+  .recipe-cost-summary > small {
+    grid-column: auto;
+  }
+}
+
+@media (min-width: 700px) {
+  .recipe-cost-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .recipe-cost-summary .recipe-profit {
+    grid-column: span 2;
   }
 }

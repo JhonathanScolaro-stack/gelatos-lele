@@ -35,6 +35,7 @@
     homeLogoDataUrl: '',
     headerLogoDataUrl: '',
     whatsappTemplate: 'Olá, {nome}!\n\nSeu pedido Gelatos Lele foi confirmado!\n\n{itens}\n\nValor total: {total}\n\nChave Pix: {pix}',
+    catalogName: 'Gelatos Lele',
     catalogIntro: 'Geladinhos artesanais preparados com carinho. Confira os sabores disponíveis e faça seu pedido.',
     catalogPhone: '',
     businessAddress: '',
@@ -115,6 +116,7 @@
       'order-edit': 'orders-history',
       'supply-edit': 'stock-ingredient',
       'ready-edit': 'stock-ready',
+      'recipe-view': 'records-catalog',
       'stock-ready-manual': 'stock-ready',
       'production-edit': 'production',
       'supplier-edit': 'records-suppliers'
@@ -153,6 +155,7 @@
     editProduction: '',
     editSupplier: '',
     editExpense: '',
+    viewRecipe: '',
     deliveryDraft: null,
     reportFilter: { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '' },
     reportRanking: ''
@@ -307,6 +310,19 @@
     const batchCost = round(material.batchCost + labor);
     return { ...material, materialCost: material.batchCost, laborCost: labor, batchCost, unitCost: round(batchCost / n(recipe.yieldUnits)) };
   }
+  // Este é o lucro bruto do sabor: preço de venda menos material e mão de obra.
+  // Frete e despesas gerais continuam aparecendo no lucro real do Financeiro.
+  function recipeMetrics(recipe) {
+    const cost = fullRecipeCost(recipe);
+    const saleUnitPrice = n(recipe.saleUnitPrice);
+    const unitProfit = round(saleUnitPrice - cost.unitCost);
+    return {
+      ...cost,
+      saleUnitPrice,
+      unitProfit,
+      margin: saleUnitPrice > 0 ? round(unitProfit / saleUnitPrice * 100) : 0
+    };
+  }
   function createProduction(recipe, batches, date, correction = false) {
     const result = window.GelatosCore.produce(recipe, batches, supplies());
     const labor = laborCost(recipe, batches);
@@ -444,6 +460,7 @@
     if (state.screen === 'supply-edit') return supplyEditScreen();
     if (state.screen === 'ready-edit') return readyEditScreen();
     if (state.screen === 'recipes') return recipeScreen();
+    if (state.screen === 'recipe-view') return recipeViewScreen();
     if (state.screen === 'production') return productionScreen();
     if (state.screen === 'production-edit') return productionEditScreen();
     if (state.screen.startsWith('finance-')) return financeScreen();
@@ -611,14 +628,24 @@
       items: state.recipeLines.map(line => ({ supplyId: line.supplyId, quantity: n(line.quantity), unit: line.unit })).filter(line => line.supplyId && line.quantity > 0 && line.unit)
     };
     if (!candidate.items.length || !(candidate.yieldUnits > 0)) return null;
-    try { return fullRecipeCost(candidate); } catch (_) { return null; }
+    try { return recipeMetrics(candidate); } catch (_) { return null; }
   }
   function updateRecipePreview() {
     const cost = recipeDraftCost();
     const total = $('#recipePreview');
     const detailText = $('#recipeDetailPreview');
+    const materials = $('#recipeMaterialsPreview');
+    const labor = $('#recipeLaborPreview');
+    const unitCost = $('#recipeUnitCostPreview');
+    const profit = $('#recipeProfitPreview');
+    const margin = $('#recipeMarginPreview');
     if (total) total.textContent = money(cost?.batchCost || 0);
-    if (detailText) detailText.textContent = cost ? 'Materiais: ' + money(cost.materialCost) + ' · mão de obra: ' + money(cost.laborCost) + ' · ' + money(cost.unitCost) + ' por geladinho' : 'Complete rendimento, item, quantidade e unidade para calcular.';
+    if (materials) materials.textContent = money(cost?.materialCost || 0);
+    if (labor) labor.textContent = money(cost?.laborCost || 0);
+    if (unitCost) unitCost.textContent = money(cost?.unitCost || 0);
+    if (profit) profit.textContent = money(cost?.unitProfit || 0);
+    if (margin) margin.textContent = cost ? cost.margin.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '%' : '—';
+    if (detailText) detailText.textContent = cost ? 'Materiais: ' + money(cost.materialCost) + ' · mão de obra: ' + money(cost.laborCost) + '. Lucro bruto = preço de venda − custo por unidade.' : 'Complete rendimento, item, quantidade e unidade para calcular.';
   }
   function recipeScreen() {
     const editing = state.editRecipe ? recipeById()[state.editRecipe] : null;
@@ -631,7 +658,7 @@
     const estimation = (() => {
       try {
         const candidate = { ...base, items: state.recipeLines.map(line => ({ supplyId: line.supplyId, quantity: n(line.quantity), unit: line.unit })).filter(line => line.supplyId && line.quantity > 0 && line.unit) };
-        return candidate.items.length && n(candidate.yieldUnits) > 0 ? fullRecipeCost(candidate) : null;
+        return candidate.items.length && n(candidate.yieldUnits) > 0 ? recipeMetrics(candidate) : null;
       } catch (_) { return null; }
     })();
     return '<section class="screen active">' + heading('Receitas', editing ? 'Editar receita' : 'Nova receita', 'Cadastre o sabor, os ingredientes, embalagens, modo de preparo e custo do lote.') + '<form id="recipeForm" class="panel form-panel"><input type="hidden" name="id" value="' + esc(editing?.id || '') + '"><div class="form-grid two">' +
@@ -641,7 +668,7 @@
       field('Mão de obra (R$)', '<input name="laborAmount" inputmode="decimal" value="' + esc(String(base.laborAmount || '').replace('.', ',')) + '">', 'Será incluída no custo do lote.') +
       field('Como calcular a mão de obra', '<select name="laborMode"><option value="batch"' + ((base.laborMode || 'batch') === 'batch' ? ' selected' : '') + '>Valor por lote</option><option value="unit"' + (base.laborMode === 'unit' ? ' selected' : '') + '>Valor por geladinho</option></select>') +
       field('Imagem do sabor', '<input name="image" type="file" accept="image/*">', 'Opcional. É usada somente no cardápio do cliente.') +
-      '</div><label class="form-field"><span>Descrição para o cliente' + info('Esta descrição aparece no cardápio que você compartilha com os clientes.', 'Descrição do cardápio') + '</span><textarea name="description" rows="3" placeholder="Ex.: Creme de leite Ninho com recheio de Nutella.">' + esc(base.description || '') + '</textarea></label><div class="catalog-switch"><label><input name="active" type="checkbox"' + (base.active !== false ? ' checked' : '') + '> Disponível no cardápio</label><span>O cardápio do cliente mostra exatamente os sabores ativos cadastrados em Cadastros › Cardápio / sabores, desde que estejam em estoque.</span></div><div class="section-line"><div><h3>Ingredientes e embalagens</h3><p>Na própria linha: selecione o item, informe a quantidade e a unidade.</p></div></div><div class="recipe-table-title"><span>Item</span><span>Quantidade</span><span>Unidade</span><span></span></div><div class="recipe-items">' + recipeRows() + '</div><button type="button" class="outline full" data-action="add-recipe-line">+ Adicionar item abaixo</button><label class="form-field"><span>Modo de preparo</span><textarea name="preparation" rows="5" placeholder="Explique o preparo passo a passo.">' + esc(base.preparation || '') + '</textarea></label><div class="calculation-row"><span>Custo total do lote</span><b id="recipePreview">' + money(estimation?.batchCost || 0) + '</b><small id="recipeDetailPreview">' + (estimation ? 'Materiais: ' + money(estimation.materialCost) + ' · mão de obra: ' + money(estimation.laborCost) + ' · ' + money(estimation.unitCost) + ' por geladinho' : 'Complete rendimento, item, quantidade e unidade para calcular.') + '</small></div><div class="button-row"><button class="primary">Salvar receita</button>' + (editing ? '<button class="outline" type="button" data-action="cancel-recipe-edit">Cancelar</button>' : '') + '</div></form></section>';
+      '</div><label class="form-field"><span>Descrição para o cliente' + info('Esta descrição aparece no cardápio que você compartilha com os clientes.', 'Descrição do cardápio') + '</span><textarea name="description" rows="3" placeholder="Ex.: Creme de leite Ninho com recheio de Nutella.">' + esc(base.description || '') + '</textarea></label><div class="catalog-switch"><label><input name="active" type="checkbox"' + (base.active !== false ? ' checked' : '') + '> Disponível no cardápio</label><span>Sabores marcados como disponíveis aparecem no cardápio, inclusive quando o estoque está zerado. O cliente só consegue escolher quando houver produção pronta.</span></div><div class="section-line"><div><h3>Ingredientes e embalagens</h3><p>Na própria linha: selecione o item, informe a quantidade e a unidade.</p></div></div><div class="recipe-table-title"><span>Item</span><span>Quantidade</span><span>Unidade</span><span></span></div><div class="recipe-items">' + recipeRows() + '</div><button type="button" class="outline full" data-action="add-recipe-line">+ Adicionar item abaixo</button><label class="form-field"><span>Modo de preparo</span><textarea name="preparation" rows="5" placeholder="Explique o preparo passo a passo.">' + esc(base.preparation || '') + '</textarea></label><section class="recipe-cost-summary"><div><span>Custo dos materiais</span><b id="recipeMaterialsPreview">' + money(estimation?.materialCost || 0) + '</b></div><div><span>Mão de obra</span><b id="recipeLaborPreview">' + money(estimation?.laborCost || 0) + '</b></div><div><span>Custo total do lote</span><b id="recipePreview">' + money(estimation?.batchCost || 0) + '</b></div><div><span>Custo por geladinho</span><b id="recipeUnitCostPreview">' + money(estimation?.unitCost || 0) + '</b></div><div class="recipe-profit"><span>Lucro bruto por geladinho</span><b id="recipeProfitPreview">' + money(estimation?.unitProfit || 0) + '</b><small id="recipeMarginPreview">' + (estimation ? estimation.margin.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '% da venda' : '—') + '</small></div><small id="recipeDetailPreview">' + (estimation ? 'Preço de venda: ' + money(estimation.saleUnitPrice) + '. Materiais e mão de obra já estão incluídos no custo.' : 'Complete rendimento, item, quantidade e unidade para calcular.') + '</small></section><div class="button-row"><button class="primary">Salvar receita</button>' + (editing ? '<button class="outline" type="button" data-action="cancel-recipe-edit">Cancelar</button>' : '') + '</div></form></section>';
   }
   function productionScreen() {
     const selected = recipeById()[state.productionRecipe] || null;
@@ -781,15 +808,35 @@
       field('Buscar', '<input class="filter-search" data-filter="query" value="' + esc(f.query) + '" placeholder="Cliente, local, sabor, fornecedor...">') +
       '<button class="outline" type="button" data-action="clear-filter">Limpar</button><button class="secondary" type="button" data-action="export-xlsx">Baixar Excel</button></div><div class="panel report-summary">' + totalText + '</div><div class="list">' + (rows.map(row => reportCard(row, kind)).join('') || empty('Nenhum resultado encontrado.')) + '</div></section>';
   }
+  function recipeViewScreen() {
+    const recipe = recipeById()[state.viewRecipe];
+    if (!recipe) return '<section class="screen active">' + heading('Receitas', 'Receita não encontrada', 'Ela pode ter sido excluída.') + '<button class="outline" data-route="records:catalog">Voltar ao cardápio</button></section>';
+    let metrics = null, costError = '';
+    try { metrics = recipeMetrics(recipe); } catch (error) { costError = error.message || 'Não foi possível calcular os custos desta receita.'; }
+    const product = ready()[recipe.id];
+    const ingredientRows = recipe.items.map(item => {
+      const supply = supplies()[item.supplyId];
+      const line = metrics?.lines.find(entry => String(entry.supplyId) === String(item.supplyId));
+      return '<li><b>' + esc(supply?.name || 'Item removido') + '</b><span>' + qtyText(item.quantity) + ' ' + esc(item.unit || supply?.unit || '') + (line ? ' · ' + money(line.total) : '') + '</span></li>';
+    }).join('') || '<li>Sem ingredientes cadastrados.</li>';
+    const photo = recipe.imageData ? '<img class="recipe-view-image" src="' + esc(recipe.imageData) + '" alt="' + esc(recipe.name) + '">' : '';
+    const financial = metrics
+      ? '<section class="recipe-cost-summary view"><div><span>Preço de venda</span><b>' + money(metrics.saleUnitPrice) + '</b></div><div><span>Materiais / lote</span><b>' + money(metrics.materialCost) + '</b></div><div><span>Mão de obra / lote</span><b>' + money(metrics.laborCost) + '</b></div><div><span>Custo / geladinho</span><b>' + money(metrics.unitCost) + '</b></div><div class="recipe-profit"><span>Lucro bruto / geladinho</span><b>' + money(metrics.unitProfit) + '</b><small>' + metrics.margin.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '% do preço de venda</small></div><small>Lucro bruto: preço de venda − custo dos materiais e mão de obra. O lucro real da empresa também considera despesas e frete no Financeiro.</small></section>'
+      : '<section class="panel caution"><b>Não foi possível calcular o custo.</b><p>' + esc(costError) + '</p></section>';
+    return '<section class="screen active">' + heading('Receitas', recipe.name, 'Visualização da receita, do preparo e da rentabilidade por geladinho.') + '<section class="panel recipe-view">' + photo + '<p class="recipe-view-description">' + esc(recipe.description || 'Sem descrição para o cardápio.').replace(/\n/g, '<br>') + '</p><dl><dt>Rendimento do lote</dt><dd>' + qtyText(recipe.yieldUnits) + ' geladinhos</dd><dt>Estoque produzido</dt><dd>' + qtyText(product?.quantity || 0) + ' un.</dd><dt>Status no cardápio</dt><dd>' + (recipe.active === false ? 'Oculto' : 'Disponível') + '</dd></dl></section>' + financial + '<section class="panel recipe-view"><h2>Ingredientes e embalagens</h2><ul class="recipe-view-items">' + ingredientRows + '</ul></section><section class="panel recipe-view"><h2>Modo de preparo</h2><p class="recipe-preparation">' + esc(recipe.preparation || 'Modo de preparo não cadastrado.').replace(/\n/g, '<br>') + '</p></section><div class="button-row"><button class="primary" data-action="edit-recipe" data-id="' + esc(recipe.id) + '">Editar receita</button><button class="outline" data-route="records:catalog">Voltar ao cardápio</button></div></section>';
+  }
   function catalogScreen() {
     const cards = data.recipes.slice().sort((a, b) => a.name.localeCompare(b.name)).map(recipe => {
       const product = ready()[recipe.id];
       const quantity = product ? round(product.quantity) : 0;
       const source = product ? 'Em estoque: ' + quantity + ' un.' : 'Ainda não foi produzido';
       const photo = recipe.imageData ? '<div class="customer-preview"><img src="' + esc(recipe.imageData) + '" alt=""></div>' : '';
-      return detail(recipe.name, source, money(recipe.saleUnitPrice), recipe.active === false ? 'oculto' : 'ativo', '<p>' + esc(recipe.description || 'Sem descrição para o cliente.').replace(/\n/g, '<br>') + '</p>' + photo + '<p class="form-note">Este é o mesmo sabor que poderá aparecer no cardápio do cliente: precisa estar ativo e ter estoque produzido.</p><div class="details-actions"><button class="outline" data-action="edit-recipe" data-id="' + esc(recipe.id) + '">Editar sabor</button><button class="secondary" data-action="toggle-catalog" data-id="' + esc(recipe.id) + '">' + (recipe.active === false ? 'Mostrar no cardápio' : 'Ocultar do cardápio') + '</button><button class="outline danger-button" data-action="delete-recipe" data-id="' + esc(recipe.id) + '">Excluir receita</button></div>');
+      let metrics = null;
+      try { metrics = recipeMetrics(recipe); } catch (_) { /* A visualização explicará o item que falta. */ }
+      const profit = metrics ? '<p class="recipe-card-profit"><b>Lucro bruto por geladinho:</b> ' + money(metrics.unitProfit) + ' · ' + metrics.margin.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '%</p>' : '<p class="form-note">Complete os custos para calcular o lucro por geladinho.</p>';
+      return detail(recipe.name, source, money(recipe.saleUnitPrice), recipe.active === false ? 'oculto' : 'ativo', '<p>' + esc(recipe.description || 'Sem descrição para o cliente.').replace(/\n/g, '<br>') + '</p>' + photo + profit + '<p class="form-note">Sabor ativo aparece no cardápio mesmo sem estoque; quando estiver zerado, o cliente vê “esgotado” e não consegue selecionar.</p><div class="details-actions"><button class="secondary" data-action="view-recipe" data-id="' + esc(recipe.id) + '">Visualizar receita</button><button class="outline" data-action="edit-recipe" data-id="' + esc(recipe.id) + '">Editar sabor</button><button class="outline" data-action="toggle-catalog" data-id="' + esc(recipe.id) + '">' + (recipe.active === false ? 'Mostrar no cardápio' : 'Ocultar do cardápio') + '</button><button class="outline danger-button" data-action="delete-recipe" data-id="' + esc(recipe.id) + '">Excluir receita</button></div>');
     }).join('') || empty('Ainda não há sabores cadastrados.');
-    return '<section class="screen active">' + heading('Cadastros', 'Cardápio e sabores', 'Cadastre ou edite aqui os sabores que podem ser produzidos. Este é o cardápio usado pelo link do cliente.') + '<div class="isolated-actions"><button class="primary" data-action="new-recipe">Cadastrar novo sabor</button><button class="secondary" data-action="copy-catalog-link">Gerar link para o cliente</button></div><section class="panel"><p class="form-note">Para aparecer ao cliente, o sabor precisa estar marcado como disponível e ter quantidade no Estoque produzido.</p></section><div class="list">' + cards + '</div></section>';
+    return '<section class="screen active">' + heading('Cadastros', 'Cardápio e sabores', 'Cadastre, visualize e edite aqui os sabores que podem ser produzidos. Este é o cardápio usado pelo link do cliente.') + '<div class="isolated-actions"><button class="primary" data-action="new-recipe">Cadastrar novo sabor</button><button class="secondary" data-action="copy-catalog-link">Gerar link para o cliente</button></div><section class="panel"><p class="form-note">Todo sabor ativo aparece no cardápio do cliente. A quantidade disponível vem do Estoque produzido; com zero, ele fica visível como esgotado e sem seleção.</p></section><div class="list">' + cards + '</div></section>';
   }
   function supplierScreen() {
     const cards = data.suppliers.slice().sort((a, b) => a.name.localeCompare(b.name)).map(item => detail(item.name, esc(item.note || 'Sem observação'), '', 'fornecedor', '<div class="details-actions"><button class="outline" data-action="edit-supplier" data-id="' + esc(item.id) + '">Editar</button><button class="outline danger-button" data-action="delete-supplier" data-id="' + esc(item.id) + '">Excluir</button></div>')).join('') || empty('Nenhum fornecedor cadastrado.');
@@ -881,10 +928,11 @@
     if (section === 'catalog') {
       const link = catalogLink();
       return '<section class="screen active">' + heading('Configurações', 'Cardápio do cliente', 'Configure as informações do link que mostra os sabores cadastrados em Cadastros › Cardápio / sabores.') + '<form id="catalogSettingsForm" class="panel form-panel">' +
+        field('Nome exibido no cardápio', '<input name="catalogName" value="' + esc(data.settings.catalogName || 'Gelatos Lele') + '" placeholder="Ex.: Gelatos Lele">', 'Título que o cliente vê no topo do cardápio.') +
         field('Texto de apresentação', '<textarea name="catalogIntro" rows="3">' + esc(data.settings.catalogIntro || '') + '</textarea>', 'O cliente lê este texto ao abrir o cardápio.') +
         field('WhatsApp da empresa', '<input name="catalogPhone" inputmode="tel" value="' + esc(data.settings.catalogPhone || '') + '">', 'É usado se o celular não tiver a opção de compartilhar disponível.') +
         field('Endereço / instruções', '<textarea name="businessAddress" rows="3">' + esc(data.settings.businessAddress || '') + '</textarea>', 'Ex.: retirada no endereço, horário ou taxa de entrega.') +
-        '<button class="primary full">Salvar informações do cardápio</button></form><section class="panel"><h2>Link para enviar ao cliente</h2><p>O link mostra somente os sabores ativos cadastrados no Cardápio que têm estoque produzido.</p><div class="customer-link"><input readonly value="' + esc(link) + '"><button class="secondary" type="button" data-action="copy-catalog-link">Copiar link</button></div><p class="form-note">Com a nuvem ativada, o pedido do cliente entra diretamente nos pedidos e reserva o estoque na mesma hora.</p></section></section>';
+        '<button class="primary full">Salvar informações do cardápio</button></form><section class="panel"><h2>Link para enviar ao cliente</h2><p>O link mostra todos os sabores ativos. Quando não houver produção pronta, o cliente vê o sabor como esgotado e não consegue incluí-lo no pedido.</p><div class="customer-link"><input readonly value="' + esc(link) + '"><button class="secondary" type="button" data-action="copy-catalog-link">Copiar link</button></div><p class="form-note">Com a nuvem ativada, o pedido do cliente entra diretamente nos pedidos e reserva o estoque na mesma hora.</p></section></section>';
     }
     if (section === 'delivery') {
       const draft = state.deliveryDraft || (state.deliveryDraft = defaultDeliveryDraft());
@@ -910,7 +958,7 @@
   }
   function catalogPayload() {
     return {
-      brand: 'Gelatos Lele',
+      brand: data.settings.catalogName || 'Gelatos Lele',
       intro: data.settings.catalogIntro || '',
       phone: data.settings.catalogPhone || '',
       address: data.settings.businessAddress || '',
@@ -919,7 +967,7 @@
       deliveryZones: deliveryZones(data.settings.deliveryZones),
       freeDeliveryMinValue: Math.max(0, n(data.settings.freeDeliveryMinValue)),
       freeDeliveryMinItems: Math.max(0, n(data.settings.freeDeliveryMinItems)),
-      products: data.recipes.filter(recipe => recipe.active !== false && n(ready()[recipe.id]?.quantity) > 0).map(recipe => ({
+      products: data.recipes.filter(recipe => recipe.active !== false).map(recipe => ({
         id: recipe.id,
         name: recipe.name,
         description: recipe.description || '',
@@ -931,7 +979,7 @@
   }
   function catalogLink() {
     try {
-      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=29';
+      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=30';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -1292,7 +1340,7 @@
   }
   function saveCatalogSettings(form) {
     const f = form.elements;
-    Object.assign(data.settings, { catalogIntro: f.catalogIntro.value.trim(), catalogPhone: f.catalogPhone.value.trim(), businessAddress: f.businessAddress.value.trim() });
+    Object.assign(data.settings, { catalogName: f.catalogName.value.trim() || 'Gelatos Lele', catalogIntro: f.catalogIntro.value.trim(), catalogPhone: f.catalogPhone.value.trim(), businessAddress: f.businessAddress.value.trim() });
     save();
     toast('Informações do cardápio atualizadas.');
     navigate('settings:catalog');
@@ -1654,6 +1702,7 @@
     if (action === 'add-recipe-line') { state.recipeDraft = recipeDraftFromScreen(); state.recipeLines.push({ supplyId: '', quantity: '', unit: '' }); render({ preserveScroll: true, focusSelector: '[data-recipe-supply="' + (state.recipeLines.length - 1) + '"]' }); return; }
     if (action === 'remove-recipe-line') { state.recipeLines.splice(n(actionNode.dataset.index), 1); if (!state.recipeLines.length) state.recipeLines.push({ supplyId: '', quantity: '', unit: '' }); state.recipeDraft = recipeDraftFromScreen(); render({ preserveScroll: true }); return; }
     if (action === 'new-recipe') { state.editRecipe = ''; state.recipeLinesLoaded = false; state.recipeLines = [{ supplyId: '', quantity: '', unit: '' }]; state.recipeDraft = null; navigate('recipes'); return; }
+    if (action === 'view-recipe') { state.viewRecipe = id; state.screen = 'recipe-view'; render(); return; }
     if (action === 'edit-recipe') {
       const recipe = recipeById()[id];
       if (recipe) { state.editRecipe = id; state.recipeLines = recipe.items.map(line => ({ ...line })); state.recipeLinesLoaded = true; state.recipeDraft = { ...recipe }; navigate('recipes'); }
