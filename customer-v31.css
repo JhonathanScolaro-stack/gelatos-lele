@@ -1,0 +1,15 @@
+/* Agrupamento por tipo de geladinho no cardápio do cliente. */
+.products { gap: 18px; }
+.catalog-type { display: grid; gap: 9px; }
+.catalog-type-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 3px; }
+.catalog-type-heading h3 { margin: 0; color: var(--ink); font-size: 17px; }
+.catalog-type-heading span { color: var(--muted); font-size: 12px; font-weight: 750; }
+.product-list { display: grid; gap: 11px; }
+.product-type { justify-self: start; padding: 2px 7px; border-radius: 99px; font-size: 10px; font-weight: 850; line-height: 1.25; }
+.type-agua { background: #e4f4fb; color: #216880; }
+.type-leite { background: #f6edd5; color: #806126; }
+.type-gourmet { background: #fbe4ed; color: #a43b59; }
+
+@media (min-width: 720px) {
+  .catalog-type-heading h3 { font-size: 19px; }
+}

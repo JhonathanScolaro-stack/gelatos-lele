@@ -25,6 +25,12 @@
   const qtyInput = value => qty(value).toFixed(3).replace('.', ',');
   const money = value => moneyFormat.format(n(value));
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
+  const normalizeProductType = value => {
+    const type = String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLocaleLowerCase('pt-BR');
+    if (type === 'agua') return 'Água';
+    if (type === 'leite') return 'Leite';
+    return 'Gourmet';
+  };
   const brDate = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? String(value).slice(8, 10) + '/' + String(value).slice(5, 7) + '/' + String(value).slice(0, 4) : '—';
   const empty = text => '<p class="list-empty">' + esc(text) + '</p>';
   const day = value => String(value || '').slice(0, 10);
@@ -67,6 +73,7 @@
       recipes: Array.isArray(old.recipes) ? old.recipes.map(item => ({
         ...item,
         active: item.active !== false,
+        productType: normalizeProductType(item.productType),
         description: item.description || '',
         preparation: item.preparation || '',
         laborAmount: Math.max(0, n(item.laborAmount)),
@@ -339,9 +346,10 @@
       product.unitCost = round((oldQty * n(product.unitCost) + n(result.outputQuantity) * n(result.unitCost)) / (oldQty + n(result.outputQuantity)));
       product.quantity = qty(oldQty + n(result.outputQuantity));
       product.saleUnitPrice = n(recipe.saleUnitPrice);
+      product.productType = normalizeProductType(recipe.productType);
       product.movements.push({ id: uid(), kind: correction ? 'Produção corrigida' : 'Produção', quantity: n(result.outputQuantity), date });
     } else {
-      product = { id: uid(), recipeId: recipe.id, name: recipe.name, quantity: n(result.outputQuantity), unitCost: n(result.unitCost), saleUnitPrice: n(recipe.saleUnitPrice), minimumStock: 0, movements: [{ id: uid(), kind: 'Produção', quantity: n(result.outputQuantity), date }] };
+      product = { id: uid(), recipeId: recipe.id, name: recipe.name, productType: normalizeProductType(recipe.productType), quantity: n(result.outputQuantity), unitCost: n(result.unitCost), saleUnitPrice: n(recipe.saleUnitPrice), minimumStock: 0, movements: [{ id: uid(), kind: 'Produção', quantity: n(result.outputQuantity), date }] };
       data.readyStock.push(product);
     }
     return result;
@@ -610,6 +618,7 @@
     return {
       id: form ? control(form, 'id')?.value || '' : '',
       name: form ? control(form, 'name')?.value || '' : '',
+      productType: f?.productType?.value || 'Gourmet',
       yieldUnits: f?.yieldUnits?.value || '',
       saleUnitPrice: f?.saleUnitPrice?.value || '',
       laborAmount: f?.laborAmount?.value || '',
@@ -654,7 +663,7 @@
       state.recipeDraft = { ...editing };
       state.recipeLinesLoaded = true;
     }
-    const base = editing || state.recipeDraft || { name: '', yieldUnits: '', saleUnitPrice: '', laborAmount: '', laborMode: 'batch', preparation: '', description: '', active: true };
+    const base = editing || state.recipeDraft || { name: '', productType: 'Gourmet', yieldUnits: '', saleUnitPrice: '', laborAmount: '', laborMode: 'batch', preparation: '', description: '', active: true };
     const estimation = (() => {
       try {
         const candidate = { ...base, items: state.recipeLines.map(line => ({ supplyId: line.supplyId, quantity: n(line.quantity), unit: line.unit })).filter(line => line.supplyId && line.quantity > 0 && line.unit) };
@@ -663,6 +672,7 @@
     })();
     return '<section class="screen active">' + heading('Receitas', editing ? 'Editar receita' : 'Nova receita', 'Cadastre o sabor, os ingredientes, embalagens, modo de preparo e custo do lote.') + '<form id="recipeForm" class="panel form-panel"><input type="hidden" name="id" value="' + esc(editing?.id || '') + '"><div class="form-grid two">' +
       field('Nome do sabor', '<input name="name" required value="' + esc(base.name || '') + '" placeholder="Ex.: Ninho com Nutella">') +
+      field('Tipo do geladinho', '<select name="productType"><option value="Água"' + (normalizeProductType(base.productType) === 'Água' ? ' selected' : '') + '>Geladinho de água</option><option value="Leite"' + (normalizeProductType(base.productType) === 'Leite' ? ' selected' : '') + '>Geladinho de leite</option><option value="Gourmet"' + (normalizeProductType(base.productType) === 'Gourmet' ? ' selected' : '') + '>Geladinho gourmet</option></select>', 'Organiza o cardápio do cliente por tipo. Não muda custo, rendimento ou estoque.') +
       field('Rendimento do lote (un.)', '<input name="yieldUnits" required inputmode="decimal" value="' + esc(base.yieldUnits || '') + '">', 'Quantidade de geladinhos que esta receita completa produz.') +
       field('Preço de venda por unidade (R$)', '<input name="saleUnitPrice" required inputmode="decimal" value="' + esc(String(base.saleUnitPrice || '').replace('.', ',')) + '">') +
       field('Mão de obra (R$)', '<input name="laborAmount" inputmode="decimal" value="' + esc(String(base.laborAmount || '').replace('.', ',')) + '">', 'Será incluída no custo do lote.') +
@@ -823,13 +833,13 @@
     const financial = metrics
       ? '<section class="recipe-cost-summary view"><div><span>Preço de venda</span><b>' + money(metrics.saleUnitPrice) + '</b></div><div><span>Materiais / lote</span><b>' + money(metrics.materialCost) + '</b></div><div><span>Mão de obra / lote</span><b>' + money(metrics.laborCost) + '</b></div><div><span>Custo / geladinho</span><b>' + money(metrics.unitCost) + '</b></div><div class="recipe-profit"><span>Lucro bruto / geladinho</span><b>' + money(metrics.unitProfit) + '</b><small>' + metrics.margin.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '% do preço de venda</small></div><small>Lucro bruto: preço de venda − custo dos materiais e mão de obra. O lucro real da empresa também considera despesas e frete no Financeiro.</small></section>'
       : '<section class="panel caution"><b>Não foi possível calcular o custo.</b><p>' + esc(costError) + '</p></section>';
-    return '<section class="screen active">' + heading('Receitas', recipe.name, 'Visualização da receita, do preparo e da rentabilidade por geladinho.') + '<section class="panel recipe-view">' + photo + '<p class="recipe-view-description">' + esc(recipe.description || 'Sem descrição para o cardápio.').replace(/\n/g, '<br>') + '</p><dl><dt>Rendimento do lote</dt><dd>' + qtyText(recipe.yieldUnits) + ' geladinhos</dd><dt>Estoque produzido</dt><dd>' + qtyText(product?.quantity || 0) + ' un.</dd><dt>Status no cardápio</dt><dd>' + (recipe.active === false ? 'Oculto' : 'Disponível') + '</dd></dl></section>' + financial + '<section class="panel recipe-view"><h2>Ingredientes e embalagens</h2><ul class="recipe-view-items">' + ingredientRows + '</ul></section><section class="panel recipe-view"><h2>Modo de preparo</h2><p class="recipe-preparation">' + esc(recipe.preparation || 'Modo de preparo não cadastrado.').replace(/\n/g, '<br>') + '</p></section><div class="button-row"><button class="primary" data-action="edit-recipe" data-id="' + esc(recipe.id) + '">Editar receita</button><button class="outline" data-route="records:catalog">Voltar ao cardápio</button></div></section>';
+    return '<section class="screen active">' + heading('Receitas', recipe.name, 'Visualização da receita, do preparo e da rentabilidade por geladinho.') + '<section class="panel recipe-view">' + photo + '<p class="recipe-view-description">' + esc(recipe.description || 'Sem descrição para o cardápio.').replace(/\n/g, '<br>') + '</p><dl><dt>Tipo do geladinho</dt><dd>' + esc(normalizeProductType(recipe.productType)) + '</dd><dt>Rendimento do lote</dt><dd>' + qtyText(recipe.yieldUnits) + ' geladinhos</dd><dt>Estoque produzido</dt><dd>' + qtyText(product?.quantity || 0) + ' un.</dd><dt>Status no cardápio</dt><dd>' + (recipe.active === false ? 'Oculto' : 'Disponível') + '</dd></dl></section>' + financial + '<section class="panel recipe-view"><h2>Ingredientes e embalagens</h2><ul class="recipe-view-items">' + ingredientRows + '</ul></section><section class="panel recipe-view"><h2>Modo de preparo</h2><p class="recipe-preparation">' + esc(recipe.preparation || 'Modo de preparo não cadastrado.').replace(/\n/g, '<br>') + '</p></section><div class="button-row"><button class="primary" data-action="edit-recipe" data-id="' + esc(recipe.id) + '">Editar receita</button><button class="outline" data-route="records:catalog">Voltar ao cardápio</button></div></section>';
   }
   function catalogScreen() {
     const cards = data.recipes.slice().sort((a, b) => a.name.localeCompare(b.name)).map(recipe => {
       const product = ready()[recipe.id];
       const quantity = product ? round(product.quantity) : 0;
-      const source = product ? 'Em estoque: ' + quantity + ' un.' : 'Ainda não foi produzido';
+      const source = 'Tipo: ' + normalizeProductType(recipe.productType) + ' · ' + (product ? 'em estoque: ' + quantity + ' un.' : 'ainda não foi produzido');
       const photo = recipe.imageData ? '<div class="customer-preview"><img src="' + esc(recipe.imageData) + '" alt=""></div>' : '';
       let metrics = null;
       try { metrics = recipeMetrics(recipe); } catch (_) { /* A visualização explicará o item que falta. */ }
@@ -970,6 +980,7 @@
       products: data.recipes.filter(recipe => recipe.active !== false).map(recipe => ({
         id: recipe.id,
         name: recipe.name,
+        type: normalizeProductType(recipe.productType),
         description: recipe.description || '',
         price: n(recipe.saleUnitPrice),
         available: n(ready()[recipe.id]?.quantity),
@@ -979,7 +990,7 @@
   }
   function catalogLink() {
     try {
-      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=30';
+      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=31';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -1047,7 +1058,12 @@
     state.orderLines.forEach(line => {
       if (line.productId && n(line.quantity) > 0) grouped[line.productId] = qty((grouped[line.productId] || 0) + n(line.quantity));
     });
-    return Object.entries(grouped).map(([productId, quantity]) => ({ productId, quantity, saleUnitPrice: n(ready()[productId]?.saleUnitPrice) }));
+    return Object.entries(grouped).map(([productId, quantity]) => ({
+      productId,
+      quantity,
+      saleUnitPrice: n(ready()[productId]?.saleUnitPrice),
+      productType: normalizeProductType(recipeById()[productId]?.productType || ready()[productId]?.productType)
+    }));
   }
   function reserveOrder(lines, date, kind) {
     const result = window.GelatosCore.validateOrder(lines, ready());
@@ -1189,6 +1205,7 @@
       const recipe = {
         id: recipeId || uid(),
         name: control(form, 'name').value.trim(),
+        productType: normalizeProductType(f.productType.value),
         yieldUnits: n(f.yieldUnits.value),
         saleUnitPrice: n(f.saleUnitPrice.value),
         laborAmount: Math.max(0, n(f.laborAmount.value)),
@@ -1202,6 +1219,12 @@
       const index = data.recipes.findIndex(item => String(item.id) === String(recipe.id));
       if (index >= 0) data.recipes.splice(index, 1, recipe);
       else data.recipes.push(recipe);
+      // Preço e tipo novos valem para vendas futuras; o custo unitário do lote pronto continua histórico.
+      data.readyStock.filter(item => String(item.recipeId) === String(recipe.id)).forEach(product => {
+        product.name = recipe.name;
+        product.productType = recipe.productType;
+        product.saleUnitPrice = recipe.saleUnitPrice;
+      });
       state.editRecipe = '';
       state.recipeLinesLoaded = false;
       state.recipeLines = [{ supplyId: '', quantity: '', unit: '' }];
@@ -1283,10 +1306,11 @@
       product.unitCost = round((oldQuantity * n(product.unitCost) + quantity * unitCost) / (oldQuantity + quantity));
       product.quantity = qty(oldQuantity + quantity);
       product.saleUnitPrice = n(recipe.saleUnitPrice);
+      product.productType = normalizeProductType(recipe.productType);
       product.minimumStock = n(f.minimumStock.value) || n(product.minimumStock);
       product.movements.push({ id: uid(), kind: 'Cadastro manual', quantity, date });
     } else {
-      product = { id: uid(), recipeId: recipe.id, name: recipe.name, quantity, unitCost, saleUnitPrice: n(recipe.saleUnitPrice), minimumStock: Math.max(0, n(f.minimumStock.value)), movements: [{ id: uid(), kind: 'Cadastro manual', quantity, date }] };
+      product = { id: uid(), recipeId: recipe.id, name: recipe.name, productType: normalizeProductType(recipe.productType), quantity, unitCost, saleUnitPrice: n(recipe.saleUnitPrice), minimumStock: Math.max(0, n(f.minimumStock.value)), movements: [{ id: uid(), kind: 'Cadastro manual', quantity, date }] };
       data.readyStock.push(product);
     }
     save();

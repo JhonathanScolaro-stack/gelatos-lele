@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v30-catalog-review';
+const CACHE = 'gelatos-lele-company-v31-product-types';
 const ASSETS = [
   './',
   './index.html',
@@ -14,6 +14,7 @@ const ASSETS = [
   './icon-oficial-v2.png',
   './customer.html',
   './customer.css',
+  './customer-v31.css',
   './customer.js'
 ];
 self.addEventListener('install', event => {

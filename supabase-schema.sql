@@ -55,6 +55,7 @@ as $$
     select coalesce(jsonb_agg(jsonb_build_object(
       'id', recipe.item->>'id',
       'name', coalesce(recipe.item->>'name', 'Sabor'),
+      'type', coalesce(nullif(recipe.item->>'productType', ''), 'Gourmet'),
       'description', coalesce(recipe.item->>'description', ''),
       'price', coalesce(nullif(regexp_replace(coalesce(recipe.item->>'saleUnitPrice', '0'), '[^0-9.-]', '', 'g'), '')::numeric, 0),
       'available', coalesce(nullif(regexp_replace(coalesce(stock.item->>'quantity', '0'), '[^0-9.-]', '', 'g'), '')::numeric, 0),
@@ -204,7 +205,7 @@ begin
     v_subtotal := v_subtotal + v_quantity * v_price;
     v_cost := v_cost + v_quantity * v_unit_cost;
     v_item_count := v_item_count + v_quantity;
-    v_items := v_items || jsonb_build_array(jsonb_build_object('productId', v_product_id, 'productName', coalesce(v_recipe->>'name', 'Sabor'), 'quantity', v_quantity, 'saleUnitPrice', v_price, 'unitCost', v_unit_cost, 'total', round(v_quantity * v_price, 2), 'cost', round(v_quantity * v_unit_cost, 2), 'picked', false));
+    v_items := v_items || jsonb_build_array(jsonb_build_object('productId', v_product_id, 'productName', coalesce(v_recipe->>'name', 'Sabor'), 'productType', coalesce(nullif(v_recipe->>'productType', ''), 'Gourmet'), 'quantity', v_quantity, 'saleUnitPrice', v_price, 'unitCost', v_unit_cost, 'total', round(v_quantity * v_price, 2), 'cost', round(v_quantity * v_unit_cost, 2), 'picked', false));
     v_data := jsonb_set(v_data, '{readyStock}', (
       select jsonb_agg(case when stock.item->>'recipeId' = v_product_id then jsonb_set(jsonb_set(stock.item, '{quantity}', to_jsonb(round(v_available - v_quantity, 3))), '{movements}', coalesce(stock.item->'movements', '[]'::jsonb) || jsonb_build_array(jsonb_build_object('id', v_order_id || '-' || v_product_id, 'kind', 'Pedido do cliente', 'quantity', -v_quantity, 'date', current_date::text))) else stock.item end)
       from jsonb_array_elements(coalesce(v_data->'readyStock', '[]'::jsonb)) as stock(item)
