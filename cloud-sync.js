@@ -74,20 +74,17 @@
     return rpc('gelatos_save_state', { p_slug: config.storeSlug, p_state: state, p_revision: revision });
   }
   async function getCatalog() {
-    const query = '?store_slug=eq.' + encodeURIComponent(config.storeSlug) + '&select=payload';
-    const rows = await request('/rest/v1/gelatos_public_catalog' + query, {
-      method: 'GET',
-      cache: 'no-store',
-      headers: { 'Cache-Control': 'no-cache, no-store, max-age=0', Pragma: 'no-cache' }
-    });
-    if (!Array.isArray(rows) || !rows[0]?.payload || !Array.isArray(rows[0].payload.products)) throw new Error('O cardápio ainda está sendo preparado. Tente novamente em instantes.');
-    return rows[0].payload;
+    const result = await rpc('gelatos_get_public_catalog', { p_slug: config.storeSlug }, false);
+    if (!result?.payload || !Array.isArray(result.payload.products)) throw new Error('O cardápio ainda está sendo preparado. Tente novamente em instantes.');
+    return result.payload;
   }
   async function placeCustomerOrder(order) {
     return rpc('gelatos_place_customer_order', {
       p_slug: config.storeSlug,
       p_request_id: order.requestId,
+      p_client_id: order.clientId,
       p_customer: order.customer,
+      p_phone: order.phone,
       p_mode: order.mode,
       p_zone_id: order.zoneId,
       p_address: order.address,
@@ -95,9 +92,14 @@
       p_items: order.items
     }, false);
   }
+  async function listMembers() { return rpc('gelatos_list_members', { p_slug: config.storeSlug }); }
+  async function addMember(email, role) { return rpc('gelatos_add_member', { p_slug: config.storeSlug, p_email: email, p_role: role }); }
+  async function removeMember(userId) { return rpc('gelatos_remove_member', { p_slug: config.storeSlug, p_user_id: userId }); }
+  async function listBackups() { return rpc('gelatos_list_backups', { p_slug: config.storeSlug }); }
+  async function restoreBackup(snapshotDate) { return rpc('gelatos_restore_backup', { p_slug: config.storeSlug, p_snapshot_date: snapshotDate }); }
   function hasSession() { return Boolean(session?.access_token || readSession()?.access_token); }
   function email() { return session?.user?.email || readSession()?.user?.email || ''; }
   function signOut() { persistSession(null); }
 
-  window.GelatosCloud = Object.freeze({ config, hasSession, email, signUp, signIn, signOut, claimStore, getState, saveState, getCatalog, placeCustomerOrder });
+  window.GelatosCloud = Object.freeze({ config, hasSession, email, signUp, signIn, signOut, claimStore, getState, saveState, getCatalog, placeCustomerOrder, listMembers, addMember, removeMember, listBackups, restoreBackup });
 })();

@@ -60,6 +60,10 @@
   }
   const categoryNameFrom = (list, id, legacy) => list.find(item => String(item.id) === String(id))?.name || (legacy ? normalizeProductType(legacy) : '') || list[0]?.name || 'Geladinho';
   const brDate = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? String(value).slice(8, 10) + '/' + String(value).slice(5, 7) + '/' + String(value).slice(0, 4) : '—';
+  const brDateTime = value => {
+    const instant = new Date(value);
+    return Number.isNaN(instant.getTime()) ? '—' : instant.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+  };
   const empty = text => '<p class="list-empty">' + esc(text) + '</p>';
   const day = value => String(value || '').slice(0, 10);
   const byId = (list, key = 'id') => Object.fromEntries(list.map(item => [String(item[key]), item]));
@@ -79,7 +83,8 @@
     freeDeliveryMinValue: '',
     freeDeliveryMinItems: '',
     creditFeePercent: '',
-    debitFeePercent: ''
+    debitFeePercent: '',
+    reservationMinutes: '20'
   };
   const blankData = () => ({
     version: 18,
@@ -137,6 +142,9 @@
         paidAt: item.paidAt || '',
         paymentFee: Math.max(0, n(item.paymentFee)),
         deliveryCost: Math.max(0, n(item.deliveryCost)),
+        reservationExpiresAt: item.reservationExpiresAt || '',
+        approvedAt: item.approvedAt || '',
+        expiredAt: item.expiredAt || '',
         status: item.status || 'confirmed'
       })) : [],
       expenses: Array.isArray(old.expenses) ? old.expenses : [],
@@ -172,7 +180,7 @@
       'category-edit': 'records-categories'
     };
     const screen = fallback[String(value || '')] || String(value || '');
-    return /^(home|orders-(new|history)|stock-(purchase|ingredient|supply|ready)|recipes|production|finance-(overview|receivable|payable)|reports-(orders|finance|stock)|records-(catalog|suppliers|categories)|tools-(compare|capacity)|settings-(home|cloud|appearance|message|catalog|delivery|backup))$/.test(screen) ? screen : 'home';
+    return /^(home|orders-(new|history)|stock-(purchase|ingredient|supply|ready)|recipes|production|finance-(overview|receivable|payable)|reports-(orders|finance|stock)|records-(catalog|suppliers|categories)|tools-(compare|capacity)|settings-(home|cloud|team|appearance|message|catalog|delivery|backup|restore-preview))$/.test(screen) ? screen : 'home';
   }
   function loadLastScreen() {
     try { return resumableScreen(localStorage.getItem(LAST_SCREEN_KEY)); }
@@ -218,6 +226,11 @@
     editProductCategory: '',
     editExpense: '',
     viewRecipe: '',
+    teamMembers: null,
+    teamError: '',
+    restorePreview: null,
+    serverBackups: null,
+    serverBackupError: '',
     deliveryDraft: null,
     compareSupply: '',
     comparePrice: '',
@@ -560,6 +573,8 @@
     else if (route.startsWith('settings:')) state.screen = 'settings-' + route.split(':')[1];
     else state.screen = route;
     render();
+    if (state.screen === 'settings-team') loadTeamMembers();
+    if (state.screen === 'settings-backup') loadServerBackups();
     refreshFromCloud(true);
   }
   function reportPreset(preset) {
@@ -677,16 +692,24 @@
     };
   }
   function orderStatus(order) {
-    return order.status === 'paid' ? 'pago' : order.status === 'cancelled' ? 'cancelado' : 'pendente';
+    if (order.status === 'paid') return 'pago';
+    if (order.status === 'cancelled') return 'cancelado';
+    if (order.status === 'expired') return 'reserva expirada';
+    if (order.status === 'reserved') return 'aguardando aprovação';
+    return 'pendente';
   }
   function orderCard(order) {
     const lines = order.items.map(item => '<li>' + round(item.quantity) + ' × ' + esc(item.productName) + ' — ' + money(item.total) + '</li>').join('');
-    const pick = order.items.map((item, index) => '<label><input type="checkbox" data-pick="' + esc(order.id) + ':' + index + '"' + (item.picked ? ' checked' : '') + (order.status === 'cancelled' ? ' disabled' : '') + '> Separar ' + round(item.quantity) + ' × ' + esc(item.productName) + '</label>').join('');
-    let actions = '<button class="outline" data-action="edit-order" data-id="' + esc(order.id) + '">Editar</button><button class="secondary" data-action="send-order" data-id="' + esc(order.id) + '">Enviar confirmação</button>';
+    const locked = order.status === 'cancelled' || order.status === 'expired';
+    const pick = order.items.map((item, index) => '<label><input type="checkbox" data-pick="' + esc(order.id) + ':' + index + '"' + (item.picked ? ' checked' : '') + (locked ? ' disabled' : '') + '> Separar ' + round(item.quantity) + ' × ' + esc(item.productName) + '</label>').join('');
+    let actions = '<button class="outline" data-action="edit-order" data-id="' + esc(order.id) + '">Editar</button>';
+    if (order.status === 'reserved') actions += '<button class="primary" data-action="approve-order" data-id="' + esc(order.id) + '">Aprovar pedido</button>';
+    if (order.status === 'confirmed' || order.status === 'paid') actions += '<button class="secondary" data-action="send-order" data-id="' + esc(order.id) + '">Enviar confirmação</button>';
     if (order.status === 'confirmed') actions += '<button class="primary" data-action="mark-paid" data-id="' + esc(order.id) + '">Marcar como pago</button>';
-    if (order.status !== 'cancelled') actions += '<button class="outline" data-action="cancel-order" data-id="' + esc(order.id) + '">Cancelar</button>';
+    if (!locked) actions += '<button class="outline" data-action="cancel-order" data-id="' + esc(order.id) + '">Cancelar</button>';
     actions += '<button class="outline danger-button" data-action="delete-order" data-id="' + esc(order.id) + '">Arquivar</button>';
-    return detail(order.customer, brDate(order.date) + ' · vence ' + brDate(order.dueDate) + ' · ' + esc(order.paymentMethod), money(order.total), orderStatus(order), '<dl><dt>WhatsApp</dt><dd>' + esc(order.phone || 'não informado') + '</dd><dt>Custo vendido</dt><dd>' + money(order.cost) + '</dd><dt>Custo de entrega</dt><dd>' + money(order.deliveryCost) + '</dd><dt>Taxa de pagamento</dt><dd>' + money(order.paymentFee) + '</dd><dt>Lucro da venda</dt><dd>' + money(order.profit) + '</dd></dl><h4>Checklist de separação</h4><div class="pick-list">' + pick + '</div><h4>Itens</h4><ul>' + lines + '</ul><div class="details-actions">' + actions + '</div>');
+    const reservation = order.status === 'reserved' ? '<dt>Reserva até</dt><dd>' + brDateTime(order.reservationExpiresAt) + '</dd>' : order.status === 'expired' ? '<dt>Reserva expirada</dt><dd>' + brDateTime(order.expiredAt) + '</dd>' : '';
+    return detail(order.customer, brDate(order.date) + ' · vence ' + brDate(order.dueDate) + ' · ' + esc(order.paymentMethod), money(order.total), orderStatus(order), '<dl><dt>WhatsApp</dt><dd>' + esc(order.phone || 'não informado') + '</dd>' + reservation + '<dt>Custo vendido</dt><dd>' + money(order.cost) + '</dd><dt>Custo de entrega</dt><dd>' + money(order.deliveryCost) + '</dd><dt>Taxa de pagamento</dt><dd>' + money(order.paymentFee) + '</dd><dt>Lucro da venda</dt><dd>' + money(order.profit) + '</dd></dl><h4>Checklist de separação</h4><div class="pick-list">' + pick + '</div><h4>Itens</h4><ul>' + lines + '</ul><div class="details-actions">' + actions + '</div>');
   }
   function ordersScreen() {
     if (state.screen === 'orders-history') {
@@ -994,7 +1017,7 @@
       field('Valor máximo', '<input data-filter="max" inputmode="decimal" value="' + esc(f.max) + '">') +
       field('Pagamento', '<select data-filter="payment"><option value="">Todos</option>' + METHODS.map(method => '<option' + (f.payment === method ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') +
       (kind === 'orders' ? field('Entrega / retirada', '<select data-filter="location"><option value="">Todos os locais</option>' + Array.from(new Set(data.orders.map(orderDestination))).sort((a, b) => a.localeCompare(b, 'pt-BR')).map(location => '<option value="' + esc(location) + '"' + (f.location === location ? ' selected' : '') + '>' + esc(location) + '</option>').join('') + '</select>') : '') +
-      field('Situação', '<select data-filter="status"><option value="">Todas</option><option value="pendente"' + (f.status === 'pendente' ? ' selected' : '') + '>Pendente</option><option value="pago"' + (f.status === 'pago' ? ' selected' : '') + '>Pago</option><option value="cancelado"' + (f.status === 'cancelado' ? ' selected' : '') + '>Cancelado</option></select>') +
+      field('Situação', '<select data-filter="status"><option value="">Todas</option><option value="aguardando aprovação"' + (f.status === 'aguardando aprovação' ? ' selected' : '') + '>Aguardando aprovação</option><option value="pendente"' + (f.status === 'pendente' ? ' selected' : '') + '>Pendente</option><option value="pago"' + (f.status === 'pago' ? ' selected' : '') + '>Pago</option><option value="cancelado"' + (f.status === 'cancelado' ? ' selected' : '') + '>Cancelado</option><option value="reserva expirada"' + (f.status === 'reserva expirada' ? ' selected' : '') + '>Reserva expirada</option></select>') +
       field('Buscar', '<input class="filter-search" data-filter="query" value="' + esc(f.query) + '" placeholder="Cliente, local, sabor, fornecedor...">') +
       '<button class="outline" type="button" data-action="clear-filter">Limpar</button><button class="secondary" type="button" data-action="export-xlsx">Baixar Excel</button></div><div class="panel report-summary">' + totalText + '</div><div class="list">' + (rows.map(row => reportCard(row, kind)).join('') || empty('Nenhum resultado encontrado.')) + '</div></section>';
   }
@@ -1145,6 +1168,7 @@
       freeDeliveryMinItems: data.settings.freeDeliveryMinItems || '',
       creditFeePercent: data.settings.creditFeePercent || '',
       debitFeePercent: data.settings.debitFeePercent || '',
+      reservationMinutes: data.settings.reservationMinutes || '20',
       zones: deliveryZoneRows(data.settings.deliveryZones)
     };
   }
@@ -1158,6 +1182,7 @@
       freeDeliveryMinItems: f.freeDeliveryMinItems.value,
       creditFeePercent: f.creditFeePercent.value,
       debitFeePercent: f.debitFeePercent.value,
+      reservationMinutes: f.reservationMinutes.value,
       zones: Array.from(form.querySelectorAll('[data-delivery-zone]')).map(row => ({
         city: row.querySelector('[data-zone-city]')?.value.trim() || '',
         fee: row.querySelector('[data-zone-fee]')?.value.trim() || '',
@@ -1176,6 +1201,13 @@
       const synced = cloudRevision !== null;
       if (!signedIn) return '<section class="screen active">' + heading('Bem-vinda de volta', 'Entre para carregar sua empresa', 'Como este é um novo endereço do aplicativo, entre uma vez com o mesmo acesso usado anteriormente. Seus pedidos, estoque e financeiro continuam guardados na nuvem.') + '<form id="cloudAuthForm" class="panel form-panel"><h2>Acesso da Gelatos Lele</h2>' + field('E-mail usado no Gelatos Lele', '<input name="email" type="email" autocomplete="email" required placeholder="voce@exemplo.com">') + field('Senha do Gelatos Lele', '<input name="password" type="password" autocomplete="current-password" minlength="8" required>', 'Use a senha criada para entrar no Gelatos Lele. Não é a senha do GitHub ou do banco de dados.') + '<div class="button-row"><button class="primary" name="cloudMode" value="signin">Carregar minha empresa</button><button class="outline" name="cloudMode" value="signup">Criar acesso novo</button></div><p class="form-note">Use “Criar acesso novo” somente se sua empresa ainda não tinha sincronização. Após entrar, os dados cadastrados voltarão automaticamente.</p></form></section>';
       return '<section class="screen active">' + heading('Configurações', 'Nuvem e sincronização', synced ? 'Sua empresa está sincronizada. Alterações feitas em um celular aparecem no outro.' : 'Ative a empresa e envie os dados deste celular uma única vez.') + '<section class="panel"><h2>Acesso conectado</h2><p>' + esc(window.GelatosCloud.email() || 'E-mail conectado') + '</p><span class="badge ' + (synced ? 'paid' : 'pending') + '">' + (synced ? 'sincronizado' : 'aguardando ativação') + '</span></section>' + (synced ? '<section class="panel"><p>Os dados ficam neste celular e na nuvem. Quando houver internet, alterações e pedidos do cardápio são atualizados automaticamente.</p><div class="button-row"><button class="secondary" data-action="cloud-refresh">Atualizar agora</button><button class="outline" data-action="cloud-signout">Sair deste celular</button></div></section>' : '<form id="cloudActivateForm" class="panel form-panel"><h2>Ativar e migrar os dados</h2>' + field('Código de ativação', '<input name="activationCode" required autocomplete="off" placeholder="Código recebido no atendimento">', 'Use o código único fornecido para esta primeira ativação. Depois dele, só quem entrar com seu e-mail e senha terá acesso.') + '<button class="primary full">Ativar empresa e enviar dados deste celular</button><p class="form-note">Faça isto no celular que já tem os cadastros corretos. Os dados atuais não serão apagados.</p></form>') + '</section>';
+    }
+    if (section === 'team') {
+      const members = Array.isArray(state.teamMembers) ? state.teamMembers : [];
+      const list = members.length
+        ? '<div class="list">' + members.map(member => detail(member.email || 'Conta sem e-mail', member.role === 'owner' ? 'Proprietária' : member.role === 'manager' ? 'Gestão' : member.role === 'production' ? 'Produção' : member.role === 'sales' ? 'Vendas' : 'Consulta', '', 'acesso', member.role === 'owner' ? '<p class="form-note">A proprietária mantém o controle total da empresa.</p>' : '<div class="details-actions"><button class="outline danger-button" data-action="remove-member" data-id="' + esc(member.userId) + '">Remover acesso</button></div>')).join('') + '</div>'
+        : '<section class="panel"><p>Nenhum acesso adicional cadastrado ainda.</p></section>';
+      return '<section class="screen active">' + heading('Configurações', 'Equipe e acessos', 'Convide pessoas que já criaram acesso no Gelatos Lele. Apenas a proprietária pode incluir ou remover pessoas.') + '<form id="teamMemberForm" class="panel form-panel">' + field('E-mail da pessoa', '<input name="email" type="email" required autocomplete="email" placeholder="pessoa@exemplo.com">', 'A pessoa deve primeiro tocar em “Criar acesso novo” neste mesmo aplicativo. Depois use o mesmo e-mail aqui.') + field('Papel inicial', '<select name="role"><option value="manager">Gestão</option><option value="production">Produção</option><option value="sales">Vendas</option><option value="viewer">Consulta</option></select>', 'Nesta primeira versão, Gestão pode alterar dados; os demais papéis ficam preparados para permissões específicas na próxima etapa.') + '<button class="primary full">Liberar acesso</button></form>' + (state.teamError ? '<section class="panel caution"><b>Não foi possível atualizar a equipe.</b><p>' + esc(state.teamError) + '</p></section>' : '') + '<section class="panel"><h2>Pessoas com acesso</h2><p class="form-note">Cada pessoa deve usar seu próprio e-mail e senha. Não compartilhem a senha da proprietária.</p></section>' + list + '</section>';
     }
     if (section === 'appearance') {
       return '<section class="screen active">' + heading('Configurações', 'Logo do app', 'Troque separadamente a logo da tela inicial e a logo do cabeçalho.') + '<form id="appearanceForm" class="panel form-panel">' +
@@ -1206,14 +1238,23 @@
         field('Endereço para retirada', '<textarea name="pickupAddress" rows="3" placeholder="Ex.: Rua das Flores, 123 — Centro">' + esc(draft.pickupAddress) + '</textarea>', 'Aparece ao cliente somente quando ele escolher Retirada. Inclua endereço, horário e ponto de referência se desejar.') +
         deliveryZoneFields(draft) +
         '<section class="panel nested-panel"><h2>Taxas de cartão</h2><p class="form-note">Essas taxas são descontadas do lucro e do saldo esperado de Crédito/Débito. Deixe em branco ou zero se não quiser calcular agora.</p><div class="form-grid two">' + field('Taxa de crédito (%)', '<input name="creditFeePercent" inputmode="decimal" value="' + esc(draft.creditFeePercent) + '" placeholder="Ex.: 3,49">') + field('Taxa de débito (%)', '<input name="debitFeePercent" inputmode="decimal" value="' + esc(draft.debitFeePercent) + '" placeholder="Ex.: 1,99">') + '</div></section>' +
+        field('Tempo da reserva do cliente (minutos)', '<input name="reservationMinutes" inputmode="numeric" value="' + esc(draft.reservationMinutes) + '" placeholder="Ex.: 20">', 'Pedido enviado pelo cardápio reserva o estoque apenas por este tempo, até você aprovar. Use de 5 a 120 minutos.') +
         field('Frete grátis acima de valor (R$)', '<input name="freeDeliveryMinValue" inputmode="decimal" value="' + esc(draft.freeDeliveryMinValue) + '" placeholder="Ex.: 50,00">', 'Deixe em branco se não quiser esta regra. O frete fica grátis quando o subtotal dos geladinhos atingir este valor.') +
         field('Frete grátis acima de quantidade', '<input name="freeDeliveryMinItems" inputmode="decimal" value="' + esc(draft.freeDeliveryMinItems) + '" placeholder="Ex.: 10">', 'Deixe em branco se não quiser esta regra. O frete fica grátis quando a quantidade total atingir este número.') +
         '<button class="primary full">Salvar frete e entrega</button></form><section class="panel"><h2>Como o cliente verá</h2><p>Ao escolher Entrega, ele seleciona o local e vê subtotal, frete e total antes de enviar o pedido.</p></section></section>';
     }
     if (section === 'backup') {
-      return '<section class="screen active">' + heading('Configurações', 'Backup dos dados', 'Salve uma cópia antes de trocar de celular ou fazer alterações grandes.') + '<section class="panel"><p>O backup inclui receitas, estoque, compras, pedidos, financeiro e configurações.</p><div class="button-row"><button class="secondary" data-action="backup">Baixar backup</button><button class="outline" data-action="restore">Restaurar backup</button></div><input id="restoreFile" type="file" accept="application/json" hidden></section></section>';
+      const serverRows = Array.isArray(state.serverBackups)
+        ? (state.serverBackups.length ? '<div class="list">' + state.serverBackups.map(item => detail('Cópia de ' + brDate(item.snapshotDate), 'Gerada em ' + brDateTime(item.savedAt), 'revisão ' + item.revision, 'nuvem', '<div class="details-actions"><button class="outline danger-button" data-action="restore-server-backup" data-id="' + esc(item.snapshotDate) + '">Restaurar esta versão</button></div>')).join('') + '</div>' : '<p class="form-note">A primeira cópia diária será criada na próxima alteração salva na nuvem.</p>')
+        : '<p class="form-note">Carregando versões da nuvem…</p>';
+      return '<section class="screen active">' + heading('Configurações', 'Backup dos dados', 'Salve uma cópia antes de trocar de celular ou fazer alterações grandes.') + '<section class="panel"><h2>Cópia deste aparelho</h2><p>O arquivo inclui receitas, estoque, compras, pedidos, financeiro e configurações.</p><div class="button-row"><button class="secondary" data-action="backup">Baixar backup</button><button class="outline" data-action="restore">Restaurar arquivo</button></div><input id="restoreFile" type="file" accept="application/json" hidden></section><section class="panel"><h2>Histórico seguro da nuvem</h2><p>Guardamos uma cópia diária antes das alterações. Restaurar uma versão também preserva uma cópia do estado atual.</p>' + (state.serverBackupError ? '<p class="form-note">' + esc(state.serverBackupError) + '</p>' : '') + serverRows + '</section></section>';
     }
-    return '<section class="screen active">' + heading('Configurações', 'Configurações', 'Cada assunto fica em sua própria tela para evitar campos fora do lugar.') + '<div class="settings-list"><button data-route="settings:cloud"><b>Nuvem e sincronização</b><span>Pedidos, estoque e financeiro em todos os celulares</span></button><button data-route="settings:appearance"><b>Logo do app</b><span>Logo inicial e cabeçalho</span></button><button data-route="settings:message"><b>Mensagem e Pix</b><span>Confirmação de pedido e campos disponíveis</span></button><button data-route="settings:catalog"><b>Cardápio do cliente</b><span>Link e informações para quem vai comprar</span></button><button data-route="settings:delivery"><b>Frete e entrega</b><span>Locais, taxas e regras de frete grátis</span></button><button data-route="settings:backup"><b>Backup</b><span>Salvar e restaurar dados</span></button></div></section>';
+    if (section === 'restore-preview') {
+      const incoming = state.restorePreview;
+      if (!incoming) return '<section class="screen active">' + heading('Configurações', 'Restauração', 'Nenhum arquivo de backup foi selecionado.') + '<button class="outline" data-route="settings:backup">Voltar ao backup</button></section>';
+      return '<section class="screen active">' + heading('Configurações', 'Conferir backup antes de restaurar', 'Nada foi alterado ainda. Confira os números abaixo antes de substituir os dados atuais deste aparelho e da nuvem.') + '<section class="panel"><dl><dt>Ingredientes e insumos</dt><dd>' + incoming.supplies.length + '</dd><dt>Receitas</dt><dd>' + incoming.recipes.length + '</dd><dt>Produções</dt><dd>' + incoming.productions.length + '</dd><dt>Estoque produzido</dt><dd>' + incoming.readyStock.length + '</dd><dt>Pedidos</dt><dd>' + incoming.orders.length + '</dd><dt>Despesas</dt><dd>' + incoming.expenses.length + '</dd></dl><p class="form-note">Ao confirmar, os dados atuais serão substituídos. Baixe antes um backup dos dados atuais se quiser manter uma cópia.</p><div class="button-row"><button class="primary" data-action="confirm-restore">Restaurar este backup</button><button class="outline" data-action="cancel-restore">Cancelar</button></div></section></section>';
+    }
+    return '<section class="screen active">' + heading('Configurações', 'Configurações', 'Cada assunto fica em sua própria tela para evitar campos fora do lugar.') + '<div class="settings-list"><button data-route="settings:cloud"><b>Nuvem e sincronização</b><span>Pedidos, estoque e financeiro em todos os celulares</span></button><button data-route="settings:team"><b>Equipe e acessos</b><span>Pessoas, e-mails e funções da empresa</span></button><button data-route="settings:appearance"><b>Logo do app</b><span>Logo inicial e cabeçalho</span></button><button data-route="settings:message"><b>Mensagem e Pix</b><span>Confirmação de pedido e campos disponíveis</span></button><button data-route="settings:catalog"><b>Cardápio do cliente</b><span>Link e informações para quem vai comprar</span></button><button data-route="settings:delivery"><b>Frete e entrega</b><span>Locais, taxas e regras de frete grátis</span></button><button data-route="settings:backup"><b>Backup</b><span>Salvar e restaurar dados</span></button></div></section>';
   }
   function deliveryZones(value) {
     return String(value || '').split(/\r?\n/).map(line => {
@@ -1248,7 +1289,7 @@
   }
   function catalogLink() {
     try {
-      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=33';
+      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=34';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -1688,6 +1729,11 @@
       toast('Cadastre pelo menos um local e sua taxa de frete para usar Entrega.');
       return;
     }
+    const reservationMinutes = Math.round(n(draft.reservationMinutes));
+    if (reservationMinutes < 5 || reservationMinutes > 120) {
+      toast('Escolha uma reserva entre 5 e 120 minutos.');
+      return;
+    }
     Object.assign(data.settings, {
       deliveryModes: draft.deliveryModes.trim() || 'Retirada,Entrega',
       pickupAddress: draft.pickupAddress.trim(),
@@ -1695,7 +1741,8 @@
       freeDeliveryMinValue: draft.freeDeliveryMinValue.trim(),
       freeDeliveryMinItems: draft.freeDeliveryMinItems.trim(),
       creditFeePercent: draft.creditFeePercent.trim(),
-      debitFeePercent: draft.debitFeePercent.trim()
+      debitFeePercent: draft.debitFeePercent.trim(),
+      reservationMinutes: String(reservationMinutes)
     });
     state.deliveryDraft = null;
     save();
@@ -1732,6 +1779,26 @@
     addNotice('payment', 'Pagamento recebido: ' + order.customer, money(order.total) + ' entrou em ' + order.paymentMethod + '.', 'reports-finance');
     save();
     toast('Pagamento registrado. Esta venda agora entra no faturamento e lucro.');
+    render();
+  }
+  async function approveOrder(id) {
+    if (!await confirmLatestStock()) return;
+    const order = data.orders.find(item => String(item.id) === String(id));
+    if (!order || order.status !== 'reserved') {
+      toast('Esta reserva não está mais aguardando aprovação. Atualize a lista para conferir.');
+      return;
+    }
+    if (order.reservationExpiresAt && new Date(order.reservationExpiresAt).getTime() <= Date.now()) {
+      toast('Esta reserva venceu. Atualizando o estoque agora.');
+      forceCloudRefresh();
+      return;
+    }
+    order.status = 'confirmed';
+    order.approvedAt = new Date().toISOString();
+    order.reservationExpiresAt = '';
+    addNotice('order', 'Pedido aprovado: ' + order.customer, 'Total de ' + money(order.total) + ' aguardando pagamento.', 'orders-history');
+    save();
+    toast('Pedido aprovado. Agora você pode separar e enviar a confirmação.');
     render();
   }
   function cancelOrder(id) {
@@ -1912,10 +1979,10 @@
       try {
         const imported = JSON.parse(reader.result);
         if (!Array.isArray(imported.supplies) || !Array.isArray(imported.recipes)) throw new Error();
-        data = normalize(imported);
-        save();
-        toast('Backup restaurado neste aparelho.');
-        navigate('home');
+        state.restorePreview = normalize(imported);
+        state.screen = 'settings-restore-preview';
+        toast('Confira o conteúdo do backup antes de restaurar.');
+        render();
       } catch (_) { toast('Não foi possível restaurar este arquivo.'); }
     };
     reader.readAsText(file);
@@ -1985,6 +2052,65 @@
       render();
       toast('Dados atualizados pela nuvem.');
     } catch (error) { toast(error.message || 'Não foi possível atualizar agora.'); }
+  }
+  async function loadTeamMembers() {
+    if (!window.GelatosCloud?.hasSession()) {
+      state.teamMembers = [];
+      state.teamError = 'Entre na nuvem antes de gerenciar a equipe.';
+      if (state.screen === 'settings-team') render();
+      return;
+    }
+    state.teamError = '';
+    try {
+      const result = await window.GelatosCloud.listMembers();
+      state.teamMembers = Array.isArray(result?.members) ? result.members : [];
+    } catch (error) {
+      state.teamError = error.message || 'Não foi possível carregar os acessos.';
+    }
+    if (state.screen === 'settings-team') render();
+  }
+  async function saveTeamMember(form) {
+    const email = String(form.elements.email.value || '').trim();
+    const role = String(form.elements.role.value || 'manager');
+    if (!email) { toast('Informe o e-mail da pessoa.'); return; }
+    try {
+      await window.GelatosCloud.addMember(email, role);
+      toast('Acesso liberado para ' + email + '.');
+      await loadTeamMembers();
+    } catch (error) { toast(error.message || 'Não foi possível liberar este acesso.'); }
+  }
+  async function removeTeamMember(userId) {
+    if (!confirm('Remover o acesso desta pessoa? Ela deixará de entrar nos dados da empresa.')) return;
+    try {
+      await window.GelatosCloud.removeMember(userId);
+      toast('Acesso removido.');
+      await loadTeamMembers();
+    } catch (error) { toast(error.message || 'Não foi possível remover este acesso.'); }
+  }
+  async function loadServerBackups() {
+    if (!window.GelatosCloud?.hasSession()) return;
+    state.serverBackupError = '';
+    try {
+      const result = await window.GelatosCloud.listBackups();
+      state.serverBackups = Array.isArray(result?.backups) ? result.backups : [];
+    } catch (error) {
+      state.serverBackups = [];
+      state.serverBackupError = error.message || 'Não foi possível carregar o histórico da nuvem.';
+    }
+    if (state.screen === 'settings-backup') render();
+  }
+  async function restoreServerBackup(snapshotDate) {
+    if (!confirm('Restaurar a cópia de ' + brDate(snapshotDate) + '? O estado atual também será guardado antes da restauração.')) return;
+    try {
+      const result = await window.GelatosCloud.restoreBackup(snapshotDate);
+      data = normalize(result.state);
+      cloudRevision = Number(result.revision);
+      cloudBaseData = cloneData(data);
+      cloudDirty = false;
+      saveLocal();
+      toast('Versão restaurada da nuvem. Confira os dados antes de continuar.');
+      navigate('home');
+    } catch (error) { toast(error.message || 'Não foi possível restaurar esta versão.'); }
   }
   function downloadBlob(blob, name) {
     const link = document.createElement('a');
@@ -2099,6 +2225,7 @@
       if (order) { state.editOrder = id; state.orderLines = order.items.map(line => ({ productId: line.productId, quantity: line.quantity })); state.orderDraft = { customer: order.customer, phone: order.phone || '', payment: order.paymentMethod, date: order.date, dueDate: order.dueDate }; state.screen = 'order-edit'; render(); }
       return;
     }
+    if (action === 'approve-order') { approveOrder(id); return; }
     if (action === 'mark-paid') { markPaid(id); return; }
     if (action === 'cancel-order') { cancelOrder(id); return; }
     if (action === 'delete-order') { deleteOrder(id); return; }
@@ -2140,8 +2267,20 @@
     if (action === 'copy-catalog-link') { copyCatalogLink(); return; }
     if (action === 'cloud-refresh') { forceCloudRefresh(); return; }
     if (action === 'cloud-signout') { clearTimeout(cloudSyncTimer); cloudRevision = null; window.GelatosCloud.signOut(); toast('Este celular saiu da nuvem. Os dados locais foram mantidos.'); navigate('settings:cloud'); return; }
+    if (action === 'remove-member') { removeTeamMember(id); return; }
     if (action === 'backup') { backup(); return; }
     if (action === 'restore') { $('#restoreFile')?.click(); return; }
+    if (action === 'restore-server-backup') { restoreServerBackup(id); return; }
+    if (action === 'confirm-restore') {
+      if (!state.restorePreview) return;
+      data = normalize(state.restorePreview);
+      state.restorePreview = null;
+      save();
+      toast('Backup restaurado. Os dados serão sincronizados com a nuvem quando houver internet.');
+      navigate('home');
+      return;
+    }
+    if (action === 'cancel-restore') { state.restorePreview = null; navigate('settings:backup'); return; }
     if (action === 'restore-default-logos') { data.settings.homeLogoDataUrl = ''; data.settings.headerLogoDataUrl = ''; save(); toast('Logo padrão restaurada.'); render(); }
   });
   document.addEventListener('change', event => {
@@ -2197,6 +2336,7 @@
     const formId = form.getAttribute('id');
     if (formId === 'cloudAuthForm') authenticateCloud(form, event.submitter?.value || 'signin');
     else if (formId === 'cloudActivateForm') activateCloud(form);
+    else if (formId === 'teamMemberForm') saveTeamMember(form);
     else if (formId === 'orderForm') submitOrder(form, false);
     else if (formId === 'orderEditForm') submitOrder(form, true);
     else if (formId === 'purchaseForm') savePurchase(form);

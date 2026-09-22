@@ -490,8 +490,8 @@ begin
   values (p_slug, current_date, row_state.data, row_state.revision, auth.uid(), now())
   on conflict (store_slug, snapshot_date) do update
   set data = excluded.data, revision = excluded.revision, created_by = excluded.created_by, saved_at = excluded.saved_at;
-  delete from public.gelatos_state_snapshots
-  where store_slug = p_slug and snapshot_date < current_date - 30;
+  -- As cópias ficam preservadas: uma política de retenção pode ser definida
+  -- futuramente, sem remover o histórico por uma atualização do aplicativo.
   update public.gelatos_company_state
   set data = p_state, revision = revision + 1, updated_at = now()
   where store_slug = p_slug
