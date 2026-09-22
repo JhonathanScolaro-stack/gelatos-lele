@@ -1,6 +1,6 @@
 /* A base visual faz parte do aplicativo. Mantemos-a como arquivo separado para
    o carregamento continuar leve, inclusive no celular. */
-@import url("styles-v11.css?v=34");
+@import url("styles-v11.css?v=35");
 
 :root {
   --info-bg: #f7e5e9;
@@ -378,6 +378,113 @@
   font-size: 12px;
 }
 
+.category-recipes {
+  margin: 14px 0 4px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff8f8;
+}
+
+.category-recipes-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.category-recipes h4 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.category-recipes-heading button,
+.category-recipe-actions button {
+  min-height: 36px;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.category-recipes ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.category-recipes li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #f0dce0;
+  border-radius: 11px;
+  background: #fff;
+}
+
+.category-recipe-copy,
+.category-recipe-meta {
+  display: grid;
+  gap: 3px;
+}
+
+.category-recipe-copy {
+  min-width: 0;
+}
+
+.category-recipe-copy b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.category-recipe-copy span,
+.category-visibility {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.category-recipe-meta {
+  justify-items: end;
+  flex: 0 0 auto;
+}
+
+.category-visibility {
+  font-style: normal;
+  font-weight: 800;
+}
+
+.category-visibility.visible {
+  color: #397752;
+}
+
+.category-visibility.hidden {
+  color: #9a6872;
+}
+
+.category-recipe-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.empty-category {
+  display: grid;
+  gap: 10px;
+}
+
+.empty-category p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.category-members-panel {
+  margin-top: 14px;
+}
+
 @media (max-width: 420px) {
   .form-grid.two,
   .filters {
@@ -406,6 +513,14 @@
 
   .recipe-cost-summary > small {
     grid-column: auto;
+  }
+
+  .category-recipes li {
+    align-items: start;
+  }
+
+  .category-recipe-meta {
+    min-width: 94px;
   }
 }
 

@@ -1051,19 +1051,33 @@
     }).join('') || empty('Ainda não há sabores cadastrados.');
     return '<section class="screen active">' + heading('Cadastros', 'Cardápio e sabores', 'Cadastre, visualize e edite aqui os sabores que podem ser produzidos. Este é o cardápio usado pelo link do cliente.') + '<div class="isolated-actions"><button class="primary" data-action="new-recipe">Cadastrar novo sabor</button><button class="secondary" data-action="copy-catalog-link">Gerar link para o cliente</button></div><section class="panel"><p class="form-note">Todo sabor ativo aparece no cardápio do cliente. A quantidade disponível vem do Estoque produzido; com zero, ele fica visível como esgotado e sem seleção.</p></section><div class="list">' + cards + '</div></section>';
   }
+  function categoryRecipesMarkup(category, entries) {
+    const recipes = entries.slice().sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+    if (!recipes.length) return '<section class="category-recipes empty-category"><p>Nenhum sabor foi cadastrado nesta categoria ainda.</p><button class="primary" data-action="new-recipe-category" data-id="' + esc(category.id) + '">Cadastrar o primeiro sabor</button></section>';
+    const rows = recipes.map(recipe => {
+      const product = ready()[recipe.id];
+      const stock = n(product?.quantity);
+      const stockText = stock > 0 ? qtyText(stock) + ' un. prontas' : 'Sem unidades prontas';
+      const visibility = recipe.active === false ? 'Oculto do cardápio' : 'No cardápio';
+      return '<li><div class="category-recipe-copy"><b>' + esc(recipe.name) + '</b><span>' + money(recipe.saleUnitPrice) + ' · ' + esc(stockText) + '</span></div><div class="category-recipe-meta"><em class="category-visibility ' + (recipe.active === false ? 'hidden' : 'visible') + '">' + visibility + '</em><div class="category-recipe-actions"><button class="secondary" data-action="view-recipe" data-id="' + esc(recipe.id) + '">Ver</button><button class="outline" data-action="edit-recipe" data-id="' + esc(recipe.id) + '">Editar</button></div></div></li>';
+    }).join('');
+    return '<section class="category-recipes"><div class="category-recipes-heading"><h4>Sabores nesta categoria</h4><button class="outline" data-action="new-recipe-category" data-id="' + esc(category.id) + '">Adicionar sabor</button></div><ul>' + rows + '</ul></section>';
+  }
   function categoryScreen() {
     const cards = productCategories().map(category => {
-      const recipes = data.recipes.filter(recipe => categoryFor(recipe).id === category.id);
+      const recipes = data.recipes.filter(recipe => categoryFor(recipe).id === category.id).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
       const active = recipes.filter(recipe => recipe.active !== false).length;
-      return detail(category.name, recipes.length + (recipes.length === 1 ? ' sabor cadastrado' : ' sabores cadastrados'), active + (active === 1 ? ' ativo' : ' ativos'), 'categoria', '<p class="form-note">Esta categoria organiza os sabores no cardápio do cliente. Ela não altera custo, receita, produção ou estoque.</p><div class="details-actions"><button class="outline" data-action="edit-category" data-id="' + esc(category.id) + '">Editar</button><button class="outline danger-button" data-action="delete-category" data-id="' + esc(category.id) + '">Excluir</button></div>');
+      const names = recipes.length ? 'Sabores: ' + recipes.map(recipe => esc(recipe.name)).join(' · ') : 'Nenhum sabor cadastrado nesta categoria.';
+      return detail(category.name, names, active + (active === 1 ? ' ativo' : ' ativos'), 'categoria', '<p class="form-note">Esta categoria organiza os sabores no cardápio do cliente. Ela não altera custo, receita, produção ou estoque.</p>' + categoryRecipesMarkup(category, recipes) + '<div class="details-actions"><button class="outline" data-action="edit-category" data-id="' + esc(category.id) + '">Editar categoria</button><button class="outline danger-button" data-action="delete-category" data-id="' + esc(category.id) + '">Excluir categoria</button></div>');
     }).join('') || empty('Cadastre pelo menos uma categoria para organizar o cardápio.');
-    return '<section class="screen active">' + heading('Cadastros', 'Categorias de geladinho', 'Crie e edite as divisões que aparecem no cardápio do cliente.') + '<form id="categoryForm" class="panel form-panel"><div class="form-grid two">' + field('Nome da categoria', '<input name="name" required placeholder="Ex.: Geladinho de água">', 'Exemplos iniciais: geladinho de água, geladinho de leite e geladinho gourmet.') + '</div><button class="primary full">Cadastrar categoria</button></form><section class="panel"><p class="form-note">Para excluir uma categoria, primeiro altere as receitas que ainda usam essa categoria. Assim nenhum sabor fica sem identificação.</p></section><div class="list">' + cards + '</div></section>';
+    return '<section class="screen active">' + heading('Cadastros', 'Categorias de geladinho', 'Crie, consulte e edite as divisões do cardápio. Cada categoria mostra os sabores, estoque e situação de cada item.') + '<form id="categoryForm" class="panel form-panel"><div class="form-grid two">' + field('Nome da categoria', '<input name="name" required placeholder="Ex.: Geladinho de água">', 'Exemplos iniciais: geladinho de água, geladinho de leite e geladinho gourmet.') + '</div><button class="primary full">Cadastrar categoria</button></form><section class="panel"><p class="form-note">Para excluir uma categoria, primeiro altere as receitas que ainda usam essa categoria. Assim nenhum sabor fica sem identificação.</p></section><div class="list">' + cards + '</div></section>';
   }
   function categoryEditScreen() {
     const category = productCategories().find(item => String(item.id) === String(state.editProductCategory));
     if (!category) return '<section class="screen active">' + empty('Categoria não encontrada.') + '</section>';
-    const usedBy = data.recipes.filter(recipe => categoryFor(recipe).id === category.id).length;
-    return '<section class="screen active">' + heading('Cadastros', 'Editar categoria', 'O novo nome aparece nas receitas e no cardápio, sem alterar custos ou estoque.') + '<form id="categoryEditForm" class="panel form-panel"><input type="hidden" name="id" value="' + esc(category.id) + '">' + field('Nome da categoria', '<input name="name" required value="' + esc(category.name) + '">') + '<p class="form-note">Esta categoria está sendo usada por ' + usedBy + (usedBy === 1 ? ' receita.' : ' receitas.') + '</p><div class="button-row"><button class="primary">Salvar alterações</button><button class="outline" type="button" data-route="records:categories">Cancelar</button><button class="outline danger-button" type="button" data-action="delete-category" data-id="' + esc(category.id) + '">Excluir categoria</button></div></form></section>';
+    const recipes = data.recipes.filter(recipe => categoryFor(recipe).id === category.id);
+    const usedBy = recipes.length;
+    return '<section class="screen active">' + heading('Cadastros', 'Editar categoria', 'O novo nome aparece nas receitas e no cardápio, sem alterar custos ou estoque.') + '<form id="categoryEditForm" class="panel form-panel"><input type="hidden" name="id" value="' + esc(category.id) + '">' + field('Nome da categoria', '<input name="name" required value="' + esc(category.name) + '">') + '<p class="form-note">Esta categoria está sendo usada por ' + usedBy + (usedBy === 1 ? ' receita.' : ' receitas.') + '</p><div class="button-row"><button class="primary">Salvar alterações</button><button class="outline" type="button" data-route="records:categories">Cancelar</button><button class="outline danger-button" type="button" data-action="delete-category" data-id="' + esc(category.id) + '">Excluir categoria</button></div></form><section class="panel category-members-panel">' + categoryRecipesMarkup(category, recipes) + '</section></section>';
   }
   function supplierScreen() {
     const cards = data.suppliers.slice().sort((a, b) => a.name.localeCompare(b.name)).map(item => detail(item.name, esc(item.note || 'Sem observação'), '', 'fornecedor', '<div class="details-actions"><button class="outline" data-action="edit-supplier" data-id="' + esc(item.id) + '">Editar</button><button class="outline danger-button" data-action="delete-supplier" data-id="' + esc(item.id) + '">Excluir</button></div>')).join('') || empty('Nenhum fornecedor cadastrado.');
@@ -1289,7 +1303,7 @@
   }
   function catalogLink() {
     try {
-      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=34';
+      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=35';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -2240,6 +2254,16 @@
     if (action === 'add-recipe-line') { state.recipeDraft = recipeDraftFromScreen(); state.recipeLines.push({ supplyId: '', quantity: '', unit: '' }); render({ preserveScroll: true, focusSelector: '[data-recipe-supply="' + (state.recipeLines.length - 1) + '"]' }); return; }
     if (action === 'remove-recipe-line') { state.recipeLines.splice(n(actionNode.dataset.index), 1); if (!state.recipeLines.length) state.recipeLines.push({ supplyId: '', quantity: '', unit: '' }); state.recipeDraft = recipeDraftFromScreen(); render({ preserveScroll: true }); return; }
     if (action === 'new-recipe') { state.editRecipe = ''; state.recipeLinesLoaded = false; state.recipeLines = [{ supplyId: '', quantity: '', unit: '' }]; state.recipeDraft = null; navigate('recipes'); return; }
+    if (action === 'new-recipe-category') {
+      const category = productCategories().find(item => String(item.id) === String(id));
+      if (!category) { toast('Categoria não encontrada. Atualize a tela e tente novamente.'); return; }
+      state.editRecipe = '';
+      state.recipeLinesLoaded = false;
+      state.recipeLines = [{ supplyId: '', quantity: '', unit: '' }];
+      state.recipeDraft = { name: '', productCategoryId: category.id, yieldUnits: '', saleUnitPrice: '', laborAmount: '', laborMode: 'batch', preparation: '', description: '', active: true };
+      navigate('recipes');
+      return;
+    }
     if (action === 'view-recipe') { state.viewRecipe = id; state.screen = 'recipe-view'; render(); return; }
     if (action === 'edit-recipe') {
       const recipe = recipeById()[id];
