@@ -1,0 +1,78 @@
+/* Consulta de compras: leitura rápida no celular e tabelas que não quebram em telas pequenas. */
+.purchase-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin: 14px 0;
+}
+
+.purchase-metrics > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.purchase-metrics span,
+.purchase-metrics small,
+.price-table small,
+.price-decision small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.purchase-metrics b {
+  color: var(--ink);
+  font-size: 17px;
+}
+
+.price-decision,
+.comparison-result {
+  display: grid;
+  gap: 7px;
+  margin: 14px 0;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+}
+
+.price-decision strong,
+.comparison-result strong { color: var(--ink); font-size: 16px; }
+.price-decision span,
+.comparison-result span { color: var(--muted); font-size: 13px; }
+.price-decision b { font-size: 14px; }
+.price-decision.good { border-color: #9fceb0; background: #f3fbf5; }
+.price-decision.good b { color: #277243; }
+.price-decision.warn { border-color: #efc6ae; background: #fff8f2; }
+.price-decision.warn b { color: #a95328; }
+
+.price-history { margin-top: 14px; }
+.price-history h2 { margin: 0 0 5px; font-size: 17px; }
+.price-history .form-note { margin: 0 0 10px; }
+.price-table { display: grid; gap: 7px; }
+.price-table > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.price-table > div:first-child { border-top: 0; }
+.price-table span { display: grid; gap: 2px; min-width: 0; }
+.price-table span:last-child { justify-items: end; text-align: right; white-space: nowrap; }
+.price-table b { color: var(--ink); font-size: 13px; }
+
+@media (min-width: 700px) {
+  .purchase-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 360px) {
+  .purchase-metrics { grid-template-columns: 1fr; }
+  .price-table > div { gap: 8px; }
+}

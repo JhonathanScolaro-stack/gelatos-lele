@@ -43,6 +43,15 @@ set search_path = public
 as $$
   with settings as (
     select coalesce(p_state->'settings', '{}'::jsonb) as item
+  ), categories as (
+    select case
+      when jsonb_typeof(p_state->'productCategories') = 'array' and jsonb_array_length(p_state->'productCategories') > 0 then p_state->'productCategories'
+      else jsonb_build_array(
+        jsonb_build_object('id', 'agua', 'name', 'Geladinho de água'),
+        jsonb_build_object('id', 'leite', 'name', 'Geladinho de leite'),
+        jsonb_build_object('id', 'gourmet', 'name', 'Geladinho gourmet')
+      )
+    end as items
   ), zones as (
     select coalesce(jsonb_agg(jsonb_build_object(
       'id', regexp_replace(lower(trim(split_part(line, '|', 1))), '[^a-z0-9]+', '-', 'g'),
@@ -55,13 +64,15 @@ as $$
     select coalesce(jsonb_agg(jsonb_build_object(
       'id', recipe.item->>'id',
       'name', coalesce(recipe.item->>'name', 'Sabor'),
-      'type', coalesce(nullif(recipe.item->>'productType', ''), 'Gourmet'),
+      'categoryId', coalesce(nullif(recipe.item->>'productCategoryId', ''), case lower(coalesce(recipe.item->>'productType', '')) when 'água' then 'agua' when 'agua' then 'agua' when 'leite' then 'leite' else 'gourmet' end),
+      'categoryName', coalesce((select category.item->>'name' from jsonb_array_elements(categories.items) category(item) where category.item->>'id' = coalesce(nullif(recipe.item->>'productCategoryId', ''), case lower(coalesce(recipe.item->>'productType', '')) when 'água' then 'agua' when 'agua' then 'agua' when 'leite' then 'leite' else 'gourmet' end) limit 1), nullif(recipe.item->>'productType', ''), 'Geladinho gourmet'),
+      'type', coalesce((select category.item->>'name' from jsonb_array_elements(categories.items) category(item) where category.item->>'id' = coalesce(nullif(recipe.item->>'productCategoryId', ''), case lower(coalesce(recipe.item->>'productType', '')) when 'água' then 'agua' when 'agua' then 'agua' when 'leite' then 'leite' else 'gourmet' end) limit 1), nullif(recipe.item->>'productType', ''), 'Geladinho gourmet'),
       'description', coalesce(recipe.item->>'description', ''),
       'price', coalesce(nullif(regexp_replace(coalesce(recipe.item->>'saleUnitPrice', '0'), '[^0-9.-]', '', 'g'), '')::numeric, 0),
       'available', coalesce(nullif(regexp_replace(coalesce(stock.item->>'quantity', '0'), '[^0-9.-]', '', 'g'), '')::numeric, 0),
       'image', case when length(coalesce(recipe.item->>'imageData', '')) < 30000 then coalesce(recipe.item->>'imageData', '') else '' end
     ) order by lower(coalesce(recipe.item->>'name', ''))), '[]'::jsonb) as items
-    from jsonb_array_elements(coalesce(p_state->'recipes', '[]'::jsonb)) recipe(item)
+    from categories, jsonb_array_elements(coalesce(p_state->'recipes', '[]'::jsonb)) recipe(item)
     left join lateral (
       select s.item
       from jsonb_array_elements(coalesce(p_state->'readyStock', '[]'::jsonb)) s(item)
@@ -81,9 +92,10 @@ as $$
     'deliveryZones', zones.items,
     'freeDeliveryMinValue', coalesce(nullif(regexp_replace(coalesce(settings.item->>'freeDeliveryMinValue', '0'), '[^0-9.-]', '', 'g'), '')::numeric, 0),
     'freeDeliveryMinItems', coalesce(nullif(regexp_replace(coalesce(settings.item->>'freeDeliveryMinItems', '0'), '[^0-9.-]', '', 'g'), '')::numeric, 0),
+    'categories', categories.items,
     'products', products.items
   )
-  from settings, zones, products;
+  from settings, categories, zones, products;
 $$;
 
 create or replace function public.gelatos_claim_store(p_slug text, p_activation_code text)
@@ -205,7 +217,7 @@ begin
     v_subtotal := v_subtotal + v_quantity * v_price;
     v_cost := v_cost + v_quantity * v_unit_cost;
     v_item_count := v_item_count + v_quantity;
-    v_items := v_items || jsonb_build_array(jsonb_build_object('productId', v_product_id, 'productName', coalesce(v_recipe->>'name', 'Sabor'), 'productType', coalesce(nullif(v_recipe->>'productType', ''), 'Gourmet'), 'quantity', v_quantity, 'saleUnitPrice', v_price, 'unitCost', v_unit_cost, 'total', round(v_quantity * v_price, 2), 'cost', round(v_quantity * v_unit_cost, 2), 'picked', false));
+    v_items := v_items || jsonb_build_array(jsonb_build_object('productId', v_product_id, 'productName', coalesce(v_recipe->>'name', 'Sabor'), 'productCategoryId', coalesce(nullif(v_recipe->>'productCategoryId', ''), 'gourmet'), 'productType', coalesce(nullif(v_recipe->>'productType', ''), 'Geladinho gourmet'), 'quantity', v_quantity, 'saleUnitPrice', v_price, 'unitCost', v_unit_cost, 'total', round(v_quantity * v_price, 2), 'cost', round(v_quantity * v_unit_cost, 2), 'picked', false));
     v_data := jsonb_set(v_data, '{readyStock}', (
       select jsonb_agg(case when stock.item->>'recipeId' = v_product_id then jsonb_set(jsonb_set(stock.item, '{quantity}', to_jsonb(round(v_available - v_quantity, 3))), '{movements}', coalesce(stock.item->'movements', '[]'::jsonb) || jsonb_build_array(jsonb_build_object('id', v_order_id || '-' || v_product_id, 'kind', 'Pedido do cliente', 'quantity', -v_quantity, 'date', current_date::text))) else stock.item end)
       from jsonb_array_elements(coalesce(v_data->'readyStock', '[]'::jsonb)) as stock(item)

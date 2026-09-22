@@ -1,0 +1,5 @@
+/* Categorias editáveis: o padrão continua legível mesmo para uma categoria criada pela empresa. */
+.product-type { background: #fbe4ed; color: #a43b59; }
+.product-type.category-agua { background: #e4f4fb; color: #216880; }
+.product-type.category-leite { background: #f6edd5; color: #806126; }
+.product-type.category-gourmet { background: #fbe4ed; color: #a43b59; }

@@ -18,9 +18,17 @@
     if (type === 'leite') return 'Leite';
     return 'Gourmet';
   };
-  const productTypeClass = value => productType(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
-  const productTypeTitle = value => 'Geladinhos de ' + productType(value);
-  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=31';
+  const categorySlug = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const DEFAULT_CATEGORIES = [
+    { id: 'agua', name: 'Geladinho de água' },
+    { id: 'leite', name: 'Geladinho de leite' },
+    { id: 'gourmet', name: 'Geladinho gourmet' }
+  ];
+  const legacyCategoryId = value => {
+    const type = productType(value);
+    return type === 'Água' ? 'agua' : type === 'Leite' ? 'leite' : 'gourmet';
+  };
+  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=32';
   const managementBack = () => window.GelatosCloud?.hasSession?.()
     ? '<button type="button" class="back-app" data-action="back-customer">← Gestão</button>'
     : '';
@@ -51,11 +59,30 @@
   function availableModes() { return String(catalog?.deliveryModes || 'Retirada,Entrega').split(',').map(mode => mode.trim()).filter(Boolean); }
   function deliveryZones() { return (Array.isArray(catalog?.deliveryZones) ? catalog.deliveryZones : []).map((zone, index) => ({ id: String(zone.id || index), name: String(zone.name || '').trim(), fee: Math.max(0, num(zone.fee)) })).filter(zone => zone.name); }
   function selectedProducts() { return catalog.products.filter(product => quantities[product.id] > 0); }
+  function catalogCategories() {
+    const entries = Array.isArray(catalog?.categories) ? catalog.categories : [];
+    const used = new Set();
+    const normalized = entries.map((category, index) => {
+      const name = String(category?.name || '').trim();
+      let id = categorySlug(category?.id || name) || 'categoria-' + (index + 1);
+      if (!name || used.has(id)) return null;
+      used.add(id);
+      return { id, name };
+    }).filter(Boolean);
+    return normalized.length ? normalized : DEFAULT_CATEGORIES.map(category => ({ ...category }));
+  }
+  function categoryForProduct(product) {
+    const categories = catalogCategories();
+    const id = String(product?.categoryId || product?.productCategoryId || '');
+    const direct = categories.find(category => category.id === id);
+    if (direct) return direct;
+    const legacy = categories.find(category => category.id === legacyCategoryId(product?.type || product?.productType));
+    return legacy || categories[0];
+  }
   function catalogGroups() {
-    const types = ['Água', 'Leite', 'Gourmet'];
-    return types.map(type => ({
-      type,
-      products: catalog.products.filter(product => productType(product.type || product.productType) === type).sort((a, b) => String(a.name).localeCompare(String(b.name), 'pt-BR'))
+    return catalogCategories().map(category => ({
+      category,
+      products: catalog.products.filter(product => categoryForProduct(product).id === category.id).sort((a, b) => String(a.name).localeCompare(String(b.name), 'pt-BR'))
     })).filter(group => group.products.length);
   }
   function applyConfirmedStock() {
@@ -100,10 +127,10 @@
     const chosen = quantities[product.id] || 0;
     const opened = String(selectedProductId) === String(product.id);
     const soldOut = available === 0;
-    const type = productType(product.type || product.productType);
+    const category = categoryForProduct(product);
     return '<article class="product ' + (soldOut ? 'sold-out' : '') + '"><button class="product-open" type="button" data-action="choose-product" data-product="' + esc(product.id) + '" aria-expanded="' + opened + '">' +
       (product.image ? '<img src="' + esc(product.image) + '" alt="' + esc(product.name) + '">' : '<div class="image-placeholder" aria-hidden="true"></div>') +
-      '<span class="product-copy"><span class="product-title"><b>' + esc(product.name) + '</b>' + (chosen ? '<em>' + chosen + ' no pedido</em>' : '') + '</span><span class="product-type type-' + productTypeClass(type) + '">' + esc(type) + '</span><span class="product-description">' + esc(product.description || 'Geladinho artesanal.') + '</span><span class="price">' + money.format(num(product.price)) + '</span><span class="availability ' + (soldOut ? 'unavailable' : '') + '">' + (soldOut ? 'Esgotado no momento' : available + ' disponível(is)') + '</span></span><span class="product-arrow" aria-hidden="true">›</span></button>' +
+      '<span class="product-copy"><span class="product-title"><b>' + esc(product.name) + '</b>' + (chosen ? '<em>' + chosen + ' no pedido</em>' : '') + '</span><span class="product-type category-' + esc(categorySlug(category.id)) + '">' + esc(category.name) + '</span><span class="product-description">' + esc(product.description || 'Geladinho artesanal.') + '</span><span class="price">' + money.format(num(product.price)) + '</span><span class="availability ' + (soldOut ? 'unavailable' : '') + '">' + (soldOut ? 'Esgotado no momento' : available + ' disponível(is)') + '</span></span><span class="product-arrow" aria-hidden="true">›</span></button>' +
       (opened ? '<section class="product-picker"><b>' + (soldOut ? 'Este sabor está esgotado.' : 'Quantos você quer?') + '</b>' + (soldOut ? '<span>Acompanhe o cardápio; ele volta a ficar disponível assim que houver produção.</span>' : '<div class="quantity"><button type="button" data-change="' + esc(product.id) + ':-1" aria-label="Diminuir ' + esc(product.name) + '"' + (chosen ? '' : ' disabled') + '>−</button><strong>' + chosen + '</strong><button type="button" data-change="' + esc(product.id) + ':1" aria-label="Aumentar ' + esc(product.name) + '"' + (chosen >= available ? ' disabled' : '') + '>+</button><small>Máximo disponível: ' + available + '</small></div>') + '</section>' : '') +
       '</article>';
   }
@@ -128,7 +155,7 @@
     const zones = deliveryZones();
     const modes = availableModes();
     const groups = catalogGroups();
-    const products = groups.length ? groups.map(group => '<section class="catalog-type"><div class="catalog-type-heading"><h3>' + esc(productTypeTitle(group.type)) + '</h3><span>' + group.products.length + (group.products.length === 1 ? ' sabor' : ' sabores') + '</span></div><div class="product-list">' + group.products.map(productCard).join('') + '</div></section>').join('') : '<p class="empty">Nenhum sabor foi cadastrado no cardápio ainda.</p>';
+    const products = groups.length ? groups.map(group => '<section class="catalog-type"><div class="catalog-type-heading"><h3>' + esc(group.category.name) + '</h3><span>' + group.products.length + (group.products.length === 1 ? ' sabor' : ' sabores') + '</span></div><div class="product-list">' + group.products.map(productCard).join('') + '</div></section>').join('') : '<p class="empty">Nenhum sabor foi cadastrado no cardápio ainda.</p>';
     root.innerHTML = '<section class="hero">' + managementBack() + '<h1>' + esc(catalog.brand || 'Gelatos Lele') + '</h1><p>' + esc(catalog.intro || 'Confira os sabores disponíveis.') + '</p></section>' +
       (catalog.address ? '<section class="notice"><b>Informações:</b><br>' + esc(catalog.address).replace(/\n/g, '<br>') + '</section>' : '') +
       '<section class="products"><div class="catalog-heading"><h2>Cardápio</h2><span>Escolha por tipo e toque em um sabor para informar a quantidade.</span></div>' + products + '</section>' +

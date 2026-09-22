@@ -31,6 +31,34 @@
     if (type === 'leite') return 'Leite';
     return 'Gourmet';
   };
+  // Categorias são um cadastro da empresa. Estes três registros mantêm a
+  // organização já usada no cardápio, mas podem ser renomeados ou expandidos.
+  const DEFAULT_PRODUCT_CATEGORIES = [
+    { id: 'agua', name: 'Geladinho de água' },
+    { id: 'leite', name: 'Geladinho de leite' },
+    { id: 'gourmet', name: 'Geladinho gourmet' }
+  ];
+  const defaultProductCategories = () => DEFAULT_PRODUCT_CATEGORIES.map(item => ({ ...item }));
+  const categorySlug = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const legacyCategoryId = value => {
+    const type = normalizeProductType(value);
+    return type === 'Água' ? 'agua' : type === 'Leite' ? 'leite' : 'gourmet';
+  };
+  function normalizeProductCategories(raw) {
+    const source = Array.isArray(raw) && raw.length ? raw : defaultProductCategories();
+    const used = new Set();
+    const entries = source.map((item, index) => {
+      const name = String(item?.name || '').trim();
+      let id = categorySlug(item?.id || name) || 'categoria-' + (index + 1);
+      const base = id;
+      let suffix = 2;
+      while (used.has(id)) id = base + '-' + suffix++;
+      used.add(id);
+      return name ? { id, name } : null;
+    }).filter(Boolean);
+    return entries.length ? entries : defaultProductCategories();
+  }
+  const categoryNameFrom = (list, id, legacy) => list.find(item => String(item.id) === String(id))?.name || (legacy ? normalizeProductType(legacy) : '') || list[0]?.name || 'Geladinho';
   const brDate = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? String(value).slice(8, 10) + '/' + String(value).slice(5, 7) + '/' + String(value).slice(0, 4) : '—';
   const empty = text => '<p class="list-empty">' + esc(text) + '</p>';
   const day = value => String(value || '').slice(0, 10);
@@ -54,13 +82,18 @@
   const blankData = () => ({
     version: 18,
     supplies: [], recipes: [], productions: [], readyStock: [], orders: [], expenses: [],
-    suppliers: [], purchases: [], notifications: [], notificationKeys: [], settings: { ...DEFAULT_SETTINGS }
+    suppliers: [], purchases: [], productCategories: defaultProductCategories(), notifications: [], notificationKeys: [], settings: { ...DEFAULT_SETTINGS }
   });
   function normalize(raw) {
     const old = raw && typeof raw === 'object' ? raw : {};
     const settings = old.settings || {};
+    const productCategories = normalizeProductCategories(old.productCategories);
+    const categoryId = item => productCategories.some(entry => String(entry.id) === String(item?.productCategoryId))
+      ? String(item.productCategoryId)
+      : (productCategories.some(entry => entry.id === legacyCategoryId(item?.productType)) ? legacyCategoryId(item?.productType) : productCategories[0].id);
     return {
       ...blankData(), ...old,
+      productCategories,
       supplies: Array.isArray(old.supplies) ? old.supplies.map(item => ({
         ...item,
         category: item.category === 'supply' ? 'supply' : 'ingredient',
@@ -73,7 +106,8 @@
       recipes: Array.isArray(old.recipes) ? old.recipes.map(item => ({
         ...item,
         active: item.active !== false,
-        productType: normalizeProductType(item.productType),
+        productCategoryId: categoryId(item),
+        productType: categoryNameFrom(productCategories, categoryId(item), item.productType),
         description: item.description || '',
         preparation: item.preparation || '',
         laborAmount: Math.max(0, n(item.laborAmount)),
@@ -83,6 +117,8 @@
       productions: Array.isArray(old.productions) ? old.productions : [],
       readyStock: Array.isArray(old.readyStock) ? old.readyStock.map(item => ({
         ...item,
+        productCategoryId: categoryId(item),
+        productType: categoryNameFrom(productCategories, categoryId(item), item.productType),
         quantity: Math.max(0, n(item.quantity)),
         unitCost: Math.max(0, n(item.unitCost)),
         saleUnitPrice: Math.max(0, n(item.saleUnitPrice)),
@@ -126,10 +162,11 @@
       'recipe-view': 'records-catalog',
       'stock-ready-manual': 'stock-ready',
       'production-edit': 'production',
-      'supplier-edit': 'records-suppliers'
+      'supplier-edit': 'records-suppliers',
+      'category-edit': 'records-categories'
     };
     const screen = fallback[String(value || '')] || String(value || '');
-    return /^(home|orders-(new|history)|stock-(purchase|ingredient|supply|ready)|recipes|production|finance-(overview|receivable|payable)|reports-(orders|finance|stock)|records-(catalog|suppliers)|tools-(compare|capacity)|settings-(home|cloud|appearance|message|catalog|delivery|backup))$/.test(screen) ? screen : 'home';
+    return /^(home|orders-(new|history)|stock-(purchase|ingredient|supply|ready)|recipes|production|finance-(overview|receivable|payable)|reports-(orders|finance|stock)|records-(catalog|suppliers|categories)|tools-(compare|capacity)|settings-(home|cloud|appearance|message|catalog|delivery|backup))$/.test(screen) ? screen : 'home';
   }
   function loadLastScreen() {
     try { return resumableScreen(localStorage.getItem(LAST_SCREEN_KEY)); }
@@ -141,6 +178,14 @@
   }
 
   let data = load();
+  const productCategories = () => data.productCategories || [];
+  const categoryFor = item => {
+    const list = productCategories();
+    const id = list.some(entry => String(entry.id) === String(item?.productCategoryId))
+      ? String(item.productCategoryId)
+      : (list.some(entry => entry.id === legacyCategoryId(item?.productType)) ? legacyCategoryId(item?.productType) : list[0]?.id || 'gourmet');
+    return { id, name: categoryNameFrom(list, id, item?.productType) };
+  };
   let cloudRevision = null;
   let cloudSyncTimer = null;
   let cloudSaving = false;
@@ -161,9 +206,13 @@
     editReady: '',
     editProduction: '',
     editSupplier: '',
+    editProductCategory: '',
     editExpense: '',
     viewRecipe: '',
     deliveryDraft: null,
+    compareSupply: '',
+    comparePrice: '',
+    compareQuantity: '',
     reportFilter: { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '' },
     reportRanking: ''
   };
@@ -341,15 +390,17 @@
       item.movements.push({ id: uid(), kind: correction ? 'Produção corrigida' : 'Produção', quantity: -n(line.quantity), total: n(line.cost), date });
     });
     let product = ready()[recipe.id];
+    const category = categoryFor(recipe);
     if (product) {
       const oldQty = n(product.quantity);
       product.unitCost = round((oldQty * n(product.unitCost) + n(result.outputQuantity) * n(result.unitCost)) / (oldQty + n(result.outputQuantity)));
       product.quantity = qty(oldQty + n(result.outputQuantity));
       product.saleUnitPrice = n(recipe.saleUnitPrice);
-      product.productType = normalizeProductType(recipe.productType);
+      product.productCategoryId = category.id;
+      product.productType = category.name;
       product.movements.push({ id: uid(), kind: correction ? 'Produção corrigida' : 'Produção', quantity: n(result.outputQuantity), date });
     } else {
-      product = { id: uid(), recipeId: recipe.id, name: recipe.name, productType: normalizeProductType(recipe.productType), quantity: n(result.outputQuantity), unitCost: n(result.unitCost), saleUnitPrice: n(recipe.saleUnitPrice), minimumStock: 0, movements: [{ id: uid(), kind: 'Produção', quantity: n(result.outputQuantity), date }] };
+      product = { id: uid(), recipeId: recipe.id, name: recipe.name, productCategoryId: category.id, productType: category.name, quantity: n(result.outputQuantity), unitCost: n(result.unitCost), saleUnitPrice: n(recipe.saleUnitPrice), minimumStock: 0, movements: [{ id: uid(), kind: 'Produção', quantity: n(result.outputQuantity), date }] };
       data.readyStock.push(product);
     }
     return result;
@@ -421,8 +472,8 @@
       navGroup('Controle de estoque', 'stock', [['Cadastrar compra', 'stock:purchase'], ['Estoque produzido', 'stock:ready'], ['Estoque de insumos', 'stock:supply'], ['Estoque de ingredientes', 'stock:ingredient'], ['Produções', 'production'], ['Nova receita', 'recipes']]) +
       navGroup('Financeiro', 'finance', [['Visão financeira', 'finance:overview'], ['Contas a receber', 'finance:receivable'], ['Contas pagas', 'finance:payable']]) +
       navGroup('Relatórios', 'reports', [['Pedidos', 'reports:orders'], ['Financeiro', 'reports:finance'], ['Estoque', 'reports:stock']]) +
-      navGroup('Cadastros', 'records', [['Cardápio / sabores', 'records:catalog'], ['Ingredientes', 'stock:ingredient'], ['Insumos', 'stock:supply'], ['Fornecedores', 'records:suppliers']]) +
-      navGroup('Ferramentas', 'tools', [['Comparar preço', 'tools:compare'], ['Produção possível', 'tools:capacity']]) +
+      navGroup('Cadastros', 'records', [['Cardápio / sabores', 'records:catalog'], ['Categorias de geladinho', 'records:categories'], ['Ingredientes', 'stock:ingredient'], ['Insumos', 'stock:supply'], ['Fornecedores', 'records:suppliers']]) +
+      navGroup('Ferramentas', 'tools', [['Preços e compras', 'tools:compare'], ['Produção possível', 'tools:capacity']]) +
       navGroup('Configurações', 'settings', [['Visão geral', 'settings:home'], ['Nuvem e sincronização', 'settings:cloud'], ['Logo do app', 'settings:appearance'], ['Mensagem e Pix', 'settings:message'], ['Cardápio do cliente', 'settings:catalog'], ['Frete e entrega', 'settings:delivery'], ['Backup', 'settings:backup']]) +
       '</nav></aside><main>' + screen() + '</main>' + noticesPanel() + infoPanel() + '</div><div id="toast" role="status" aria-live="polite"></div>';
   }
@@ -474,6 +525,8 @@
     if (state.screen.startsWith('finance-')) return financeScreen();
     if (state.screen.startsWith('reports-')) return reportsScreen();
     if (state.screen === 'records-catalog') return catalogScreen();
+    if (state.screen === 'records-categories') return categoryScreen();
+    if (state.screen === 'category-edit') return categoryEditScreen();
     if (state.screen === 'records-suppliers') return supplierScreen();
     if (state.screen === 'supplier-edit') return supplierEditScreen();
     if (state.screen.startsWith('tools-')) return toolsScreen();
@@ -548,7 +601,9 @@
     const label = category === 'supply' ? 'Estoque de insumos' : 'Estoque de ingredientes';
     const cards = data.supplies.filter(item => item.category === category).sort((a, b) => a.name.localeCompare(b.name)).map(item => {
       const moves = item.movements.slice(-8).reverse().map(move => '<li>' + brDate(move.date) + ' · ' + esc(move.kind) + ' · ' + (n(move.quantity) >= 0 ? '+' : '') + qtyText(move.quantity) + ' ' + esc(item.unit) + '</li>').join('') || '<li>Sem movimentações.</li>';
-      return detail(item.name, 'Quantidade: ' + qtyText(item.quantity) + ' ' + esc(item.unit) + ' · mínimo: ' + qtyText(item.minimumStock), money(item.averageUnitCost) + '/' + esc(item.unit), n(item.minimumStock) > 0 && n(item.quantity) <= n(item.minimumStock) ? 'mínimo' : 'em estoque', '<dl><dt>Quantidade atual</dt><dd>' + qtyText(item.quantity) + ' ' + esc(item.unit) + '</dd><dt>Custo médio</dt><dd>' + money(item.averageUnitCost) + ' / ' + esc(item.unit) + '</dd><dt>Valor em estoque</dt><dd>' + money(n(item.quantity) * n(item.averageUnitCost)) + '</dd><dt>Última compra</dt><dd>' + brDate(item.lastPurchaseAt) + '</dd><dt>Fornecedor</dt><dd>' + esc(item.lastSupplierName || '—') + '</dd></dl><h4>Movimentações recentes</h4><ul>' + moves + '</ul><div class="details-actions"><button class="outline" data-action="edit-supply" data-id="' + esc(item.id) + '">Editar</button><button class="outline danger-button" data-action="delete-supply" data-id="' + esc(item.id) + '">Excluir</button></div>');
+      const prices = purchaseStats(item);
+      const priceSummary = prices.priced.length ? '<dt>Menor preço pago</dt><dd>' + money(prices.lowestEntry.unitPrice) + ' / ' + esc(item.unit) + '</dd><dt>Média das compras</dt><dd>' + money(prices.weightedAverage) + ' / ' + esc(item.unit) + '</dd>' : '<dt>Histórico de preços</dt><dd>Sem compras registradas</dd>';
+      return detail(item.name, 'Quantidade: ' + qtyText(item.quantity) + ' ' + esc(item.unit) + ' · mínimo: ' + qtyText(item.minimumStock), money(item.averageUnitCost) + '/' + esc(item.unit), n(item.minimumStock) > 0 && n(item.quantity) <= n(item.minimumStock) ? 'mínimo' : 'em estoque', '<dl><dt>Quantidade atual</dt><dd>' + qtyText(item.quantity) + ' ' + esc(item.unit) + '</dd><dt>Custo médio do estoque</dt><dd>' + money(item.averageUnitCost) + ' / ' + esc(item.unit) + '</dd><dt>Valor em estoque</dt><dd>' + money(n(item.quantity) * n(item.averageUnitCost)) + '</dd><dt>Última compra</dt><dd>' + brDate(item.lastPurchaseAt) + '</dd><dt>Fornecedor</dt><dd>' + esc(item.lastSupplierName || '—') + '</dd>' + priceSummary + '</dl><h4>Movimentações recentes</h4><ul>' + moves + '</ul><div class="details-actions"><button class="secondary" data-action="inspect-price" data-id="' + esc(item.id) + '">Consultar preços</button><button class="outline" data-action="edit-supply" data-id="' + esc(item.id) + '">Editar</button><button class="outline danger-button" data-action="delete-supply" data-id="' + esc(item.id) + '">Excluir</button></div>');
     }).join('') || empty('Nenhum item cadastrado.');
     return '<section class="screen active">' + heading('Controle de estoque', label, 'Toque em um item para conferir movimentações ou editar todas as informações.') + '<div class="isolated-actions"><button class="primary" data-route="stock:purchase">Cadastrar nova compra</button></div><div class="list">' + cards + '</div></section>';
   }
@@ -618,7 +673,7 @@
     return {
       id: form ? control(form, 'id')?.value || '' : '',
       name: form ? control(form, 'name')?.value || '' : '',
-      productType: f?.productType?.value || 'Gourmet',
+      productCategoryId: f?.productCategoryId?.value || productCategories()[0]?.id || 'gourmet',
       yieldUnits: f?.yieldUnits?.value || '',
       saleUnitPrice: f?.saleUnitPrice?.value || '',
       laborAmount: f?.laborAmount?.value || '',
@@ -663,7 +718,7 @@
       state.recipeDraft = { ...editing };
       state.recipeLinesLoaded = true;
     }
-    const base = editing || state.recipeDraft || { name: '', productType: 'Gourmet', yieldUnits: '', saleUnitPrice: '', laborAmount: '', laborMode: 'batch', preparation: '', description: '', active: true };
+    const base = editing || state.recipeDraft || { name: '', productCategoryId: productCategories()[0]?.id || 'gourmet', yieldUnits: '', saleUnitPrice: '', laborAmount: '', laborMode: 'batch', preparation: '', description: '', active: true };
     const estimation = (() => {
       try {
         const candidate = { ...base, items: state.recipeLines.map(line => ({ supplyId: line.supplyId, quantity: n(line.quantity), unit: line.unit })).filter(line => line.supplyId && line.quantity > 0 && line.unit) };
@@ -672,7 +727,7 @@
     })();
     return '<section class="screen active">' + heading('Receitas', editing ? 'Editar receita' : 'Nova receita', 'Cadastre o sabor, os ingredientes, embalagens, modo de preparo e custo do lote.') + '<form id="recipeForm" class="panel form-panel"><input type="hidden" name="id" value="' + esc(editing?.id || '') + '"><div class="form-grid two">' +
       field('Nome do sabor', '<input name="name" required value="' + esc(base.name || '') + '" placeholder="Ex.: Ninho com Nutella">') +
-      field('Tipo do geladinho', '<select name="productType"><option value="Água"' + (normalizeProductType(base.productType) === 'Água' ? ' selected' : '') + '>Geladinho de água</option><option value="Leite"' + (normalizeProductType(base.productType) === 'Leite' ? ' selected' : '') + '>Geladinho de leite</option><option value="Gourmet"' + (normalizeProductType(base.productType) === 'Gourmet' ? ' selected' : '') + '>Geladinho gourmet</option></select>', 'Organiza o cardápio do cliente por tipo. Não muda custo, rendimento ou estoque.') +
+      field('Categoria do geladinho', '<select name="productCategoryId">' + productCategories().map(category => '<option value="' + esc(category.id) + '"' + (categoryFor(base).id === category.id ? ' selected' : '') + '>' + esc(category.name) + '</option>').join('') + '</select>', 'Organiza o cardápio do cliente. Você pode criar e editar categorias em Cadastros › Categorias de geladinho. Não muda custo, rendimento ou estoque.') +
       field('Rendimento do lote (un.)', '<input name="yieldUnits" required inputmode="decimal" value="' + esc(base.yieldUnits || '') + '">', 'Quantidade de geladinhos que esta receita completa produz.') +
       field('Preço de venda por unidade (R$)', '<input name="saleUnitPrice" required inputmode="decimal" value="' + esc(String(base.saleUnitPrice || '').replace('.', ',')) + '">') +
       field('Mão de obra (R$)', '<input name="laborAmount" inputmode="decimal" value="' + esc(String(base.laborAmount || '').replace('.', ',')) + '">', 'Será incluída no custo do lote.') +
@@ -833,13 +888,13 @@
     const financial = metrics
       ? '<section class="recipe-cost-summary view"><div><span>Preço de venda</span><b>' + money(metrics.saleUnitPrice) + '</b></div><div><span>Materiais / lote</span><b>' + money(metrics.materialCost) + '</b></div><div><span>Mão de obra / lote</span><b>' + money(metrics.laborCost) + '</b></div><div><span>Custo / geladinho</span><b>' + money(metrics.unitCost) + '</b></div><div class="recipe-profit"><span>Lucro bruto / geladinho</span><b>' + money(metrics.unitProfit) + '</b><small>' + metrics.margin.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '% do preço de venda</small></div><small>Lucro bruto: preço de venda − custo dos materiais e mão de obra. O lucro real da empresa também considera despesas e frete no Financeiro.</small></section>'
       : '<section class="panel caution"><b>Não foi possível calcular o custo.</b><p>' + esc(costError) + '</p></section>';
-    return '<section class="screen active">' + heading('Receitas', recipe.name, 'Visualização da receita, do preparo e da rentabilidade por geladinho.') + '<section class="panel recipe-view">' + photo + '<p class="recipe-view-description">' + esc(recipe.description || 'Sem descrição para o cardápio.').replace(/\n/g, '<br>') + '</p><dl><dt>Tipo do geladinho</dt><dd>' + esc(normalizeProductType(recipe.productType)) + '</dd><dt>Rendimento do lote</dt><dd>' + qtyText(recipe.yieldUnits) + ' geladinhos</dd><dt>Estoque produzido</dt><dd>' + qtyText(product?.quantity || 0) + ' un.</dd><dt>Status no cardápio</dt><dd>' + (recipe.active === false ? 'Oculto' : 'Disponível') + '</dd></dl></section>' + financial + '<section class="panel recipe-view"><h2>Ingredientes e embalagens</h2><ul class="recipe-view-items">' + ingredientRows + '</ul></section><section class="panel recipe-view"><h2>Modo de preparo</h2><p class="recipe-preparation">' + esc(recipe.preparation || 'Modo de preparo não cadastrado.').replace(/\n/g, '<br>') + '</p></section><div class="button-row"><button class="primary" data-action="edit-recipe" data-id="' + esc(recipe.id) + '">Editar receita</button><button class="outline" data-route="records:catalog">Voltar ao cardápio</button></div></section>';
+    return '<section class="screen active">' + heading('Receitas', recipe.name, 'Visualização da receita, do preparo e da rentabilidade por geladinho.') + '<section class="panel recipe-view">' + photo + '<p class="recipe-view-description">' + esc(recipe.description || 'Sem descrição para o cardápio.').replace(/\n/g, '<br>') + '</p><dl><dt>Categoria</dt><dd>' + esc(categoryFor(recipe).name) + '</dd><dt>Rendimento do lote</dt><dd>' + qtyText(recipe.yieldUnits) + ' geladinhos</dd><dt>Estoque produzido</dt><dd>' + qtyText(product?.quantity || 0) + ' un.</dd><dt>Status no cardápio</dt><dd>' + (recipe.active === false ? 'Oculto' : 'Disponível') + '</dd></dl></section>' + financial + '<section class="panel recipe-view"><h2>Ingredientes e embalagens</h2><ul class="recipe-view-items">' + ingredientRows + '</ul></section><section class="panel recipe-view"><h2>Modo de preparo</h2><p class="recipe-preparation">' + esc(recipe.preparation || 'Modo de preparo não cadastrado.').replace(/\n/g, '<br>') + '</p></section><div class="button-row"><button class="primary" data-action="edit-recipe" data-id="' + esc(recipe.id) + '">Editar receita</button><button class="outline" data-route="records:catalog">Voltar ao cardápio</button></div></section>';
   }
   function catalogScreen() {
     const cards = data.recipes.slice().sort((a, b) => a.name.localeCompare(b.name)).map(recipe => {
       const product = ready()[recipe.id];
       const quantity = product ? round(product.quantity) : 0;
-      const source = 'Tipo: ' + normalizeProductType(recipe.productType) + ' · ' + (product ? 'em estoque: ' + quantity + ' un.' : 'ainda não foi produzido');
+      const source = 'Categoria: ' + categoryFor(recipe).name + ' · ' + (product ? 'em estoque: ' + quantity + ' un.' : 'ainda não foi produzido');
       const photo = recipe.imageData ? '<div class="customer-preview"><img src="' + esc(recipe.imageData) + '" alt=""></div>' : '';
       let metrics = null;
       try { metrics = recipeMetrics(recipe); } catch (_) { /* A visualização explicará o item que falta. */ }
@@ -847,6 +902,20 @@
       return detail(recipe.name, source, money(recipe.saleUnitPrice), recipe.active === false ? 'oculto' : 'ativo', '<p>' + esc(recipe.description || 'Sem descrição para o cliente.').replace(/\n/g, '<br>') + '</p>' + photo + profit + '<p class="form-note">Sabor ativo aparece no cardápio mesmo sem estoque; quando estiver zerado, o cliente vê “esgotado” e não consegue selecionar.</p><div class="details-actions"><button class="secondary" data-action="view-recipe" data-id="' + esc(recipe.id) + '">Visualizar receita</button><button class="outline" data-action="edit-recipe" data-id="' + esc(recipe.id) + '">Editar sabor</button><button class="outline" data-action="toggle-catalog" data-id="' + esc(recipe.id) + '">' + (recipe.active === false ? 'Mostrar no cardápio' : 'Ocultar do cardápio') + '</button><button class="outline danger-button" data-action="delete-recipe" data-id="' + esc(recipe.id) + '">Excluir receita</button></div>');
     }).join('') || empty('Ainda não há sabores cadastrados.');
     return '<section class="screen active">' + heading('Cadastros', 'Cardápio e sabores', 'Cadastre, visualize e edite aqui os sabores que podem ser produzidos. Este é o cardápio usado pelo link do cliente.') + '<div class="isolated-actions"><button class="primary" data-action="new-recipe">Cadastrar novo sabor</button><button class="secondary" data-action="copy-catalog-link">Gerar link para o cliente</button></div><section class="panel"><p class="form-note">Todo sabor ativo aparece no cardápio do cliente. A quantidade disponível vem do Estoque produzido; com zero, ele fica visível como esgotado e sem seleção.</p></section><div class="list">' + cards + '</div></section>';
+  }
+  function categoryScreen() {
+    const cards = productCategories().map(category => {
+      const recipes = data.recipes.filter(recipe => categoryFor(recipe).id === category.id);
+      const active = recipes.filter(recipe => recipe.active !== false).length;
+      return detail(category.name, recipes.length + (recipes.length === 1 ? ' sabor cadastrado' : ' sabores cadastrados'), active + (active === 1 ? ' ativo' : ' ativos'), 'categoria', '<p class="form-note">Esta categoria organiza os sabores no cardápio do cliente. Ela não altera custo, receita, produção ou estoque.</p><div class="details-actions"><button class="outline" data-action="edit-category" data-id="' + esc(category.id) + '">Editar</button><button class="outline danger-button" data-action="delete-category" data-id="' + esc(category.id) + '">Excluir</button></div>');
+    }).join('') || empty('Cadastre pelo menos uma categoria para organizar o cardápio.');
+    return '<section class="screen active">' + heading('Cadastros', 'Categorias de geladinho', 'Crie e edite as divisões que aparecem no cardápio do cliente.') + '<form id="categoryForm" class="panel form-panel"><div class="form-grid two">' + field('Nome da categoria', '<input name="name" required placeholder="Ex.: Geladinho de água">', 'Exemplos iniciais: geladinho de água, geladinho de leite e geladinho gourmet.') + '</div><button class="primary full">Cadastrar categoria</button></form><section class="panel"><p class="form-note">Para excluir uma categoria, primeiro altere as receitas que ainda usam essa categoria. Assim nenhum sabor fica sem identificação.</p></section><div class="list">' + cards + '</div></section>';
+  }
+  function categoryEditScreen() {
+    const category = productCategories().find(item => String(item.id) === String(state.editProductCategory));
+    if (!category) return '<section class="screen active">' + empty('Categoria não encontrada.') + '</section>';
+    const usedBy = data.recipes.filter(recipe => categoryFor(recipe).id === category.id).length;
+    return '<section class="screen active">' + heading('Cadastros', 'Editar categoria', 'O novo nome aparece nas receitas e no cardápio, sem alterar custos ou estoque.') + '<form id="categoryEditForm" class="panel form-panel"><input type="hidden" name="id" value="' + esc(category.id) + '">' + field('Nome da categoria', '<input name="name" required value="' + esc(category.name) + '">') + '<p class="form-note">Esta categoria está sendo usada por ' + usedBy + (usedBy === 1 ? ' receita.' : ' receitas.') + '</p><div class="button-row"><button class="primary">Salvar alterações</button><button class="outline" type="button" data-route="records:categories">Cancelar</button><button class="outline danger-button" type="button" data-action="delete-category" data-id="' + esc(category.id) + '">Excluir categoria</button></div></form></section>';
   }
   function supplierScreen() {
     const cards = data.suppliers.slice().sort((a, b) => a.name.localeCompare(b.name)).map(item => detail(item.name, esc(item.note || 'Sem observação'), '', 'fornecedor', '<div class="details-actions"><button class="outline" data-action="edit-supplier" data-id="' + esc(item.id) + '">Editar</button><button class="outline danger-button" data-action="delete-supplier" data-id="' + esc(item.id) + '">Excluir</button></div>')).join('') || empty('Nenhum fornecedor cadastrado.');
@@ -856,6 +925,57 @@
     const item = data.suppliers.find(supplier => String(supplier.id) === String(state.editSupplier));
     if (!item) return '<section class="screen active">' + empty('Fornecedor não encontrado.') + '</section>';
     return '<section class="screen active">' + heading('Cadastros', 'Editar fornecedor', 'Altere todas as informações de uma vez.') + '<form id="supplierEditForm" class="panel form-panel"><input type="hidden" name="id" value="' + esc(item.id) + '"><div class="form-grid two">' + field('Nome do fornecedor', '<input name="name" required value="' + esc(item.name) + '">') + field('Contato / observação', '<input name="note" value="' + esc(item.note || '') + '">') + '</div><div class="button-row"><button class="primary">Salvar todas as alterações</button><button class="outline" type="button" data-route="records:suppliers">Cancelar</button><button class="outline danger-button" type="button" data-action="delete-supplier" data-id="' + esc(item.id) + '">Excluir</button></div></form></section>';
+  }
+  function purchaseHistory(item) {
+    if (!item) return [];
+    const recorded = data.purchases.filter(purchase => String(purchase.supplyId) === String(item.id));
+    const source = recorded.length ? recorded : (item.movements || []).filter(move => move.kind === 'Compra');
+    return source.map(entry => {
+      const quantity = n(entry.quantity);
+      const total = n(entry.total);
+      const unitPrice = n(entry.unitPrice) || (quantity > 0 ? round(total / quantity) : 0);
+      return {
+        id: entry.id || uid(), date: entry.date || '', quantity, total, unitPrice,
+        supplierId: entry.supplierId || '', supplierName: entry.supplierName || item.lastSupplierName || 'Fornecedor não informado',
+        paymentMethod: entry.paymentMethod || ''
+      };
+    }).filter(entry => entry.quantity > 0 && entry.unitPrice >= 0).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  }
+  function purchaseStats(item) {
+    const history = purchaseHistory(item);
+    const priced = history.filter(entry => entry.unitPrice > 0);
+    const quantity = priced.reduce((sum, entry) => sum + entry.quantity, 0);
+    const total = priced.reduce((sum, entry) => sum + entry.total, 0);
+    const lowestEntry = priced.slice().sort((a, b) => a.unitPrice - b.unitPrice || String(b.date).localeCompare(String(a.date)))[0] || null;
+    const highestEntry = priced.slice().sort((a, b) => b.unitPrice - a.unitPrice || String(b.date).localeCompare(String(a.date)))[0] || null;
+    const suppliers = Object.values(priced.reduce((groups, entry) => {
+      const key = entry.supplierId || entry.supplierName;
+      if (!groups[key]) groups[key] = { name: entry.supplierName, purchases: [], quantity: 0, total: 0 };
+      groups[key].purchases.push(entry);
+      groups[key].quantity += entry.quantity;
+      groups[key].total += entry.total;
+      return groups;
+    }, {})).map(group => ({
+      ...group,
+      average: group.quantity ? round(group.total / group.quantity) : 0,
+      lowest: Math.min(...group.purchases.map(entry => entry.unitPrice)),
+      latest: group.purchases.slice().sort((a, b) => String(b.date).localeCompare(String(a.date)))[0]
+    })).sort((a, b) => a.lowest - b.lowest || a.name.localeCompare(b.name, 'pt-BR'));
+    return { history, priced, quantity, total, latest: history[0] || null, lowestEntry, highestEntry, weightedAverage: quantity ? round(total / quantity) : 0, suppliers };
+  }
+  function priceDecision(stats, proposedPrice, plannedQuantity) {
+    if (!(proposedPrice > 0) || !stats.lowestEntry) return null;
+    const best = stats.lowestEntry.unitPrice;
+    const difference = round(proposedPrice - best);
+    const percentage = best > 0 ? round(difference / best * 100) : 0;
+    const amount = plannedQuantity > 0 ? round(difference * plannedQuantity) : 0;
+    let level = 'neutral';
+    let title = 'Preço dentro do histórico';
+    if (difference <= 0) { level = 'good'; title = difference < 0 ? 'Melhor preço já registrado' : 'Empata com o melhor preço registrado'; }
+    else if (proposedPrice <= stats.weightedAverage) { level = 'good'; title = 'Abaixo da sua média histórica'; }
+    else if (stats.highestEntry && proposedPrice > stats.highestEntry.unitPrice) { level = 'warn'; title = 'Maior preço já registrado'; }
+    else { level = 'warn'; title = 'Acima da sua média histórica'; }
+    return { best, difference, percentage, amount, level, title };
   }
   function toolsScreen() {
     if (state.screen === 'tools-capacity') {
@@ -873,13 +993,18 @@
     }
     const item = supplies()[state.compareSupply];
     const price = n(state.comparePrice);
-    let result = 'Escolha um item e informe o preço encontrado no mercado.';
-    if (item && price > 0) {
-      const older = item.movements.filter(move => move.kind === 'Compra').slice(-12).map(move => n(move.unitPrice)).filter(Boolean);
-      const lowest = older.length ? Math.min(...older) : n(item.averageUnitCost);
-      result = '<strong>' + esc(item.name) + '</strong><span>Preço informado: ' + money(price) + ' / ' + esc(item.unit) + '</span><span>Melhor compra registrada: ' + money(lowest) + ' / ' + esc(item.unit) + '</span><b class="' + (price <= lowest ? 'good' : 'warn') + '">' + (price <= lowest ? 'Vale a pena comprar por este preço.' : 'Está mais caro que a melhor compra registrada.') + '</b>';
-    }
-    return '<section class="screen active">' + heading('Ferramentas', 'Comparar preço', 'Compare o preço visto no mercado com suas compras registradas.') + '<form id="compareForm" class="panel form-panel"><div class="form-grid two">' + field('Item', '<select name="supplyId">' + options(data.supplies, state.compareSupply || '') + '</select>') + field('Preço visto (R$)', '<input name="unitPrice" inputmode="decimal" value="' + esc(state.comparePrice || '') + '">', 'Preço de uma unidade na mesma unidade cadastrada no estoque.') + '</div><button class="primary full">Comparar preço</button></form><div class="comparison-result">' + result + '</div></section>';
+    const plannedQuantity = n(state.compareQuantity);
+    const stats = purchaseStats(item);
+    const decision = priceDecision(stats, price, plannedQuantity);
+    const summary = item && stats.priced.length
+      ? '<section class="purchase-metrics"><div><span>Última compra</span><b>' + money(stats.latest.unitPrice) + '</b><small>' + brDate(stats.latest.date) + ' · ' + esc(stats.latest.supplierName) + '</small></div><div><span>Menor preço</span><b>' + money(stats.lowestEntry.unitPrice) + '</b><small>' + esc(stats.lowestEntry.supplierName) + ' · ' + brDate(stats.lowestEntry.date) + '</small></div><div><span>Média das compras</span><b>' + money(stats.weightedAverage) + '</b><small>média ponderada por quantidade</small></div><div><span>Maior preço</span><b>' + money(stats.highestEntry.unitPrice) + '</b><small>' + esc(stats.highestEntry.supplierName) + ' · ' + brDate(stats.highestEntry.date) + '</small></div><div><span>Custo do estoque atual</span><b>' + money(item.averageUnitCost) + '</b><small>média do que ainda está armazenado</small></div><div><span>Histórico</span><b>' + stats.priced.length + '</b><small>' + stats.suppliers.length + (stats.suppliers.length === 1 ? ' fornecedor' : ' fornecedores') + ' comparados</small></div></section>'
+      : item ? '<section class="panel caution"><b>Ainda não há compras com preço para comparar.</b><p>Lance a compra deste item com quantidade e total pago. A partir da primeira compra, esta tela mostrará o histórico e a melhor oferta.</p></section>' : '<section class="panel"><p>Escolha um ingrediente ou insumo para consultar o histórico de compras.</p></section>';
+    const decisionMarkup = decision
+      ? '<section class="price-decision ' + decision.level + '"><strong>' + esc(decision.title) + '</strong><span>Preço visto: ' + money(price) + ' / ' + esc(item.unit) + ' · melhor registrado: ' + money(decision.best) + ' / ' + esc(item.unit) + '.</span><b>' + (decision.difference <= 0 ? 'Economia de ' + money(Math.abs(decision.difference)) + ' por ' + esc(item.unit) : 'Diferença de ' + money(decision.difference) + ' por ' + esc(item.unit) + ' (' + decision.percentage.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '% acima do melhor preço)') + '</b>' + (plannedQuantity > 0 ? '<small>' + (decision.amount > 0 ? 'Para ' + qtyText(plannedQuantity) + ' ' + esc(item.unit) + ', custará ' + money(decision.amount) + ' a mais que a melhor compra registrada.' : 'Para ' + qtyText(plannedQuantity) + ' ' + esc(item.unit) + ', a economia estimada é de ' + money(Math.abs(decision.amount)) + ' em relação à melhor compra registrada.') + '</small>' : '') + '</section>'
+      : '<section class="comparison-result"><strong>Consulta de mercado</strong><span>Informe o preço que encontrou para saber se vale a pena comprar.</span></section>';
+    const supplierRows = stats.suppliers.length ? '<section class="panel price-history"><h2>Por fornecedor</h2><div class="price-table">' + stats.suppliers.map(supplier => '<div><span><b>' + esc(supplier.name) + '</b><small>' + supplier.purchases.length + (supplier.purchases.length === 1 ? ' compra' : ' compras') + ' · última em ' + brDate(supplier.latest.date) + '</small></span><span>Melhor: <b>' + money(supplier.lowest) + '</b><small>Média: ' + money(supplier.average) + '</small></span></div>').join('') + '</div></section>' : '';
+    const historyRows = stats.history.length ? '<section class="panel price-history"><h2>Histórico de compras</h2><p class="form-note">A comparação é válida quando a unidade de medida é a mesma para esse item.</p><div class="price-table">' + stats.history.slice(0, 15).map(entry => '<div><span><b>' + brDate(entry.date) + '</b><small>' + esc(entry.supplierName) + ' · ' + qtyText(entry.quantity) + ' ' + esc(item.unit) + '</small></span><span><b>' + money(entry.unitPrice) + ' / ' + esc(item.unit) + '</b><small>Total: ' + money(entry.total) + '</small></span></div>').join('') + '</div></section>' : '';
+    return '<section class="screen active">' + heading('Ferramentas', 'Preços e compras', 'Consulte o histórico antes de comprar e veja onde vocês pagaram menos por cada item.') + '<form id="compareForm" class="panel form-panel"><div class="form-grid two">' + field('Item', '<select name="supplyId">' + options(data.supplies.slice().sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')), state.compareSupply || '') + '</select>', 'Escolha o mesmo item e unidade cadastrados no estoque.') + field('Preço visto (R$) por ' + esc(item?.unit || 'unidade'), '<input name="unitPrice" inputmode="decimal" value="' + esc(state.comparePrice || '') + '" placeholder="Ex.: 2,99">', 'Preço de uma unidade, não o total da compra.') + field('Quantidade que pretende comprar', '<input name="quantity" inputmode="decimal" value="' + esc(state.compareQuantity || '') + '" placeholder="Opcional">', 'Usamos este campo para mostrar quanto você economiza ou paga a mais no total.') + '</div><button class="primary full">Analisar preço</button></form>' + summary + decisionMarkup + supplierRows + historyRows + '</section>';
   }
   function deliveryZoneRows(value) {
     return String(value || '').split(/\r?\n/).map(line => {
@@ -977,10 +1102,13 @@
       deliveryZones: deliveryZones(data.settings.deliveryZones),
       freeDeliveryMinValue: Math.max(0, n(data.settings.freeDeliveryMinValue)),
       freeDeliveryMinItems: Math.max(0, n(data.settings.freeDeliveryMinItems)),
+      categories: productCategories().map(category => ({ id: category.id, name: category.name })),
       products: data.recipes.filter(recipe => recipe.active !== false).map(recipe => ({
         id: recipe.id,
         name: recipe.name,
-        type: normalizeProductType(recipe.productType),
+        categoryId: categoryFor(recipe).id,
+        categoryName: categoryFor(recipe).name,
+        type: categoryFor(recipe).name,
         description: recipe.description || '',
         price: n(recipe.saleUnitPrice),
         available: n(ready()[recipe.id]?.quantity),
@@ -990,7 +1118,7 @@
   }
   function catalogLink() {
     try {
-      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=31';
+      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=32';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -1058,12 +1186,11 @@
     state.orderLines.forEach(line => {
       if (line.productId && n(line.quantity) > 0) grouped[line.productId] = qty((grouped[line.productId] || 0) + n(line.quantity));
     });
-    return Object.entries(grouped).map(([productId, quantity]) => ({
-      productId,
-      quantity,
-      saleUnitPrice: n(ready()[productId]?.saleUnitPrice),
-      productType: normalizeProductType(recipeById()[productId]?.productType || ready()[productId]?.productType)
-    }));
+    return Object.entries(grouped).map(([productId, quantity]) => {
+      const product = recipeById()[productId] || ready()[productId];
+      const category = categoryFor(product);
+      return { productId, quantity, saleUnitPrice: n(ready()[productId]?.saleUnitPrice), productCategoryId: category.id, productType: category.name };
+    });
   }
   function reserveOrder(lines, date, kind) {
     const result = window.GelatosCore.validateOrder(lines, ready());
@@ -1155,8 +1282,8 @@
     item.lastPurchaseAt = date;
     item.lastPurchaseTotal = total;
     item.lastSupplierName = supplier?.name || '';
-    item.movements.push({ id: uid(), kind: 'Compra', quantity, total, date, supplierId: supplier?.id || '', supplierName: supplier?.name || '', unitPrice, paymentMethod: f.payment.value });
     const purchase = { id: uid(), supplyId: item.id, supplyName: item.name, supplierId: supplier?.id || '', supplierName: supplier?.name || '', quantity, unit: item.unit, total, unitPrice, date, paymentMethod: f.payment.value };
+    item.movements.push({ id: uid(), purchaseId: purchase.id, kind: 'Compra', quantity, total, date, supplierId: supplier?.id || '', supplierName: supplier?.name || '', unitPrice, paymentMethod: f.payment.value });
     data.purchases.unshift(purchase);
     data.expenses.unshift({ id: uid(), name: 'Compra: ' + item.name, total, paymentMethod: f.payment.value, date, category: 'purchase', supplyId: item.id, purchaseId: purchase.id });
     save();
@@ -1202,10 +1329,12 @@
     const recipeId = control(form, 'id').value;
     const old = recipeId ? recipeById()[recipeId] : null;
     const write = imageData => {
+      const selectedCategory = productCategories().find(category => category.id === f.productCategoryId.value) || productCategories()[0];
       const recipe = {
         id: recipeId || uid(),
         name: control(form, 'name').value.trim(),
-        productType: normalizeProductType(f.productType.value),
+        productCategoryId: selectedCategory.id,
+        productType: selectedCategory.name,
         yieldUnits: n(f.yieldUnits.value),
         saleUnitPrice: n(f.saleUnitPrice.value),
         laborAmount: Math.max(0, n(f.laborAmount.value)),
@@ -1222,6 +1351,7 @@
       // Preço e tipo novos valem para vendas futuras; o custo unitário do lote pronto continua histórico.
       data.readyStock.filter(item => String(item.recipeId) === String(recipe.id)).forEach(product => {
         product.name = recipe.name;
+        product.productCategoryId = recipe.productCategoryId;
         product.productType = recipe.productType;
         product.saleUnitPrice = recipe.saleUnitPrice;
       });
@@ -1301,16 +1431,18 @@
     }
     const date = f.date.value || today();
     let product = ready()[recipe.id];
+    const category = categoryFor(recipe);
     if (product) {
       const oldQuantity = n(product.quantity);
       product.unitCost = round((oldQuantity * n(product.unitCost) + quantity * unitCost) / (oldQuantity + quantity));
       product.quantity = qty(oldQuantity + quantity);
       product.saleUnitPrice = n(recipe.saleUnitPrice);
-      product.productType = normalizeProductType(recipe.productType);
+      product.productCategoryId = category.id;
+      product.productType = category.name;
       product.minimumStock = n(f.minimumStock.value) || n(product.minimumStock);
       product.movements.push({ id: uid(), kind: 'Cadastro manual', quantity, date });
     } else {
-      product = { id: uid(), recipeId: recipe.id, name: recipe.name, productType: normalizeProductType(recipe.productType), quantity, unitCost, saleUnitPrice: n(recipe.saleUnitPrice), minimumStock: Math.max(0, n(f.minimumStock.value)), movements: [{ id: uid(), kind: 'Cadastro manual', quantity, date }] };
+      product = { id: uid(), recipeId: recipe.id, name: recipe.name, productCategoryId: category.id, productType: category.name, quantity, unitCost, saleUnitPrice: n(recipe.saleUnitPrice), minimumStock: Math.max(0, n(f.minimumStock.value)), movements: [{ id: uid(), kind: 'Cadastro manual', quantity, date }] };
       data.readyStock.push(product);
     }
     save();
@@ -1354,6 +1486,35 @@
     }
     save();
     navigate('records:suppliers');
+  }
+  function categoryNameIsAvailable(name, exceptId = '') {
+    const comparable = String(name || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
+    return comparable && !productCategories().some(item => String(item.id) !== String(exceptId) && String(item.name).trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR') === comparable);
+  }
+  function nextCategoryId(name) {
+    const base = categorySlug(name) || 'categoria';
+    let id = base;
+    let suffix = 2;
+    while (productCategories().some(item => item.id === id)) id = base + '-' + suffix++;
+    return id;
+  }
+  function saveCategory(form, editing = false) {
+    const name = String(control(form, 'name').value || '').trim();
+    const id = editing ? String(control(form, 'id').value || '') : '';
+    if (!name) { toast('Informe o nome da categoria.'); return; }
+    if (!categoryNameIsAvailable(name, id)) { toast('Já existe uma categoria com este nome.'); return; }
+    if (editing) {
+      const category = productCategories().find(item => String(item.id) === id);
+      if (!category) return;
+      category.name = name;
+      state.editProductCategory = '';
+      toast('Categoria atualizada.');
+    } else {
+      data.productCategories.push({ id: nextCategoryId(name), name });
+      toast('Categoria cadastrada.');
+    }
+    save();
+    navigate('records:categories');
   }
   function saveMessage(form) {
     data.settings.pixKey = form.elements.pixKey.value.trim();
@@ -1509,6 +1670,24 @@
     save();
     toast('Fornecedor excluído.');
     navigate('records:suppliers');
+  }
+  function deleteCategory(id) {
+    const category = productCategories().find(item => String(item.id) === String(id));
+    if (!category || !confirm('Excluir a categoria "' + category.name + '"?')) return;
+    const linked = data.recipes.filter(recipe => categoryFor(recipe).id === category.id);
+    if (linked.length) {
+      toast('Não é possível excluir: ' + linked.length + (linked.length === 1 ? ' receita usa esta categoria.' : ' receitas usam esta categoria.'));
+      return;
+    }
+    if (productCategories().length <= 1) {
+      toast('Mantenha pelo menos uma categoria cadastrada.');
+      return;
+    }
+    data.productCategories = productCategories().filter(item => item.id !== category.id);
+    state.editProductCategory = '';
+    save();
+    toast('Categoria excluída.');
+    navigate('records:categories');
   }
   function sendOrder(id) {
     const order = data.orders.find(item => String(item.id) === String(id));
@@ -1720,6 +1899,7 @@
     if (action === 'send-order') { sendOrder(id); return; }
     if (action === 'edit-supply') { state.editSupply = id; state.screen = 'supply-edit'; render(); return; }
     if (action === 'delete-supply') { deleteSupply(id); return; }
+    if (action === 'inspect-price') { state.compareSupply = id; state.comparePrice = ''; state.compareQuantity = ''; navigate('tools:compare'); return; }
     if (action === 'edit-ready') { state.editReady = id; state.screen = 'ready-edit'; render(); return; }
     if (action === 'delete-ready') { deleteReady(id); return; }
     if (action === 'new-ready') { state.screen = 'stock-ready-manual'; render(); return; }
@@ -1745,6 +1925,8 @@
     if (action === 'delete-expense') { deleteExpense(id); return; }
     if (action === 'edit-supplier') { state.editSupplier = id; state.screen = 'supplier-edit'; render(); return; }
     if (action === 'delete-supplier') { deleteSupplier(id); return; }
+    if (action === 'edit-category') { state.editProductCategory = id; state.screen = 'category-edit'; render(); return; }
+    if (action === 'delete-category') { deleteCategory(id); return; }
     if (action === 'clear-filter') { state.reportFilter = { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '' }; render(); return; }
     if (action === 'export-xlsx') { exportXlsx(); return; }
     if (action === 'copy-catalog-link') { copyCatalogLink(); return; }
@@ -1820,7 +2002,9 @@
     else if (formId === 'expenseEditForm') saveExpense(form, true);
     else if (formId === 'supplierForm') saveSupplier(form, false);
     else if (formId === 'supplierEditForm') saveSupplier(form, true);
-    else if (formId === 'compareForm') { state.compareSupply = form.elements.supplyId.value; state.comparePrice = form.elements.unitPrice.value; render(); }
+    else if (formId === 'categoryForm') saveCategory(form, false);
+    else if (formId === 'categoryEditForm') saveCategory(form, true);
+    else if (formId === 'compareForm') { state.compareSupply = form.elements.supplyId.value; state.comparePrice = form.elements.unitPrice.value; state.compareQuantity = form.elements.quantity.value; render(); }
     else if (formId === 'capacityForm') { state.capacityRecipe = form.elements.recipeId.value; render(); }
     else if (formId === 'appearanceForm') saveAppearance(form);
     else if (formId === 'messageForm') saveMessage(form);
