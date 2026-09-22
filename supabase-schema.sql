@@ -71,7 +71,10 @@ as $$
       'description', coalesce(recipe.item->>'description', ''),
       'price', coalesce(nullif(regexp_replace(coalesce(recipe.item->>'saleUnitPrice', '0'), '[^0-9.-]', '', 'g'), '')::numeric, 0),
       'available', coalesce(nullif(regexp_replace(coalesce(stock.item->>'quantity', '0'), '[^0-9.-]', '', 'g'), '')::numeric, 0),
-      'image', case when length(coalesce(recipe.item->>'imageData', '')) < 30000 then coalesce(recipe.item->>'imageData', '') else '' end
+      -- Fotos antigas eram removidas acima de 30 KB, o que deixava cartões
+      -- vazios no cliente. O app passa a otimizar novas fotos no celular;
+      -- aqui mantemos também as que já estavam cadastradas.
+      'image', coalesce(recipe.item->>'imageData', '')
     ) order by lower(coalesce(recipe.item->>'name', ''))), '[]'::jsonb) as items
     from categories, jsonb_array_elements(coalesce(p_state->'recipes', '[]'::jsonb)) recipe(item)
     left join lateral (
@@ -85,6 +88,7 @@ as $$
   select jsonb_build_object(
     'store', 'gelatos-lele',
     'brand', coalesce(nullif(settings.item->>'catalogName', ''), 'Gelatos Lele'),
+    'logo', coalesce(nullif(settings.item->>'catalogLogoDataUrl', ''), nullif(settings.item->>'headerLogoDataUrl', ''), ''),
     'intro', coalesce(settings.item->>'catalogIntro', ''),
     'phone', coalesce(settings.item->>'catalogPhone', ''),
     'address', coalesce(settings.item->>'businessAddress', ''),

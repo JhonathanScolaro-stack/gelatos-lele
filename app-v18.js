@@ -67,11 +67,41 @@
   const empty = text => '<p class="list-empty">' + esc(text) + '</p>';
   const day = value => String(value || '').slice(0, 10);
   const byId = (list, key = 'id') => Object.fromEntries(list.map(item => [String(item[key]), item]));
+  // Fotos de sabores vão para o cardápio público. Reduzimos as novas fotos
+  // antes de salvar para o link abrir rápido no celular, sem apagar fotos
+  // antigas que já tenham sido cadastradas.
+  const readFileDataUrl = file => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Não foi possível ler a imagem.'));
+    reader.readAsDataURL(file);
+  });
+  const optimizeProductImage = async file => {
+    const source = await readFileDataUrl(file);
+    return new Promise(resolve => {
+      const image = new Image();
+      image.onload = () => {
+        try {
+          const maxSide = 960;
+          const scale = Math.min(1, maxSide / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
+          canvas.height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
+          const context = canvas.getContext('2d');
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.82));
+        } catch (_) { resolve(source); }
+      };
+      image.onerror = () => resolve(source);
+      image.src = source;
+    });
+  };
 
   const DEFAULT_SETTINGS = {
     pixKey: '',
     homeLogoDataUrl: '',
     headerLogoDataUrl: '',
+    catalogLogoDataUrl: '',
     whatsappTemplate: 'Olá, {nome}!\n\nSeu pedido Gelatos Lele foi confirmado!\n\n{itens}\n\nValor total: {total}\n\nChave Pix: {pix}',
     catalogName: 'Gelatos Lele',
     catalogIntro: 'Geladinhos artesanais preparados com carinho. Confira os sabores disponíveis e faça seu pedido.',
@@ -1240,6 +1270,7 @@
       const link = catalogLink();
       return '<section class="screen active">' + heading('Configurações', 'Cardápio do cliente', 'Configure as informações do link que mostra os sabores cadastrados em Cadastros › Cardápio / sabores.') + '<form id="catalogSettingsForm" class="panel form-panel">' +
         field('Nome exibido no cardápio', '<input name="catalogName" value="' + esc(data.settings.catalogName || 'Gelatos Lele') + '" placeholder="Ex.: Gelatos Lele">', 'Título que o cliente vê no topo do cardápio.') +
+        field('Logo exibida no cardápio', '<input name="catalogLogo" type="file" accept="image/*">', 'Opcional. Se não escolher uma imagem, o cardápio usa a logo do cabeçalho; se ela também não existir, usa a marca padrão.') +
         field('Texto de apresentação', '<textarea name="catalogIntro" rows="3">' + esc(data.settings.catalogIntro || '') + '</textarea>', 'O cliente lê este texto ao abrir o cardápio.') +
         field('WhatsApp da empresa', '<input name="catalogPhone" inputmode="tel" value="' + esc(data.settings.catalogPhone || '') + '">', 'É usado se o celular não tiver a opção de compartilhar disponível.') +
         field('Endereço / instruções', '<textarea name="businessAddress" rows="3">' + esc(data.settings.businessAddress || '') + '</textarea>', 'Ex.: retirada no endereço, horário ou taxa de entrega.') +
@@ -1287,6 +1318,7 @@
       deliveryZones: deliveryZones(data.settings.deliveryZones),
       freeDeliveryMinValue: Math.max(0, n(data.settings.freeDeliveryMinValue)),
       freeDeliveryMinItems: Math.max(0, n(data.settings.freeDeliveryMinItems)),
+      logo: data.settings.catalogLogoDataUrl || data.settings.headerLogoDataUrl || '',
       categories: productCategories().map(category => ({ id: category.id, name: category.name })),
       products: data.recipes.filter(recipe => recipe.active !== false).map(recipe => ({
         id: recipe.id,
@@ -1297,13 +1329,13 @@
         description: recipe.description || '',
         price: n(recipe.saleUnitPrice),
         available: n(ready()[recipe.id]?.quantity),
-        image: recipe.imageData && recipe.imageData.length < 30000 ? recipe.imageData : ''
+        image: recipe.imageData || ''
       }))
     };
   }
   function catalogLink() {
     try {
-      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=35';
+      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=36';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -1570,10 +1602,7 @@
       write('');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => write(reader.result);
-    reader.onerror = () => toast('Não foi possível ler a imagem. Tente uma imagem menor.');
-    reader.readAsDataURL(image);
+    optimizeProductImage(image).then(write).catch(error => toast(error.message || 'Não foi possível ler a imagem. Tente outra foto.'));
   }
   function saveProduction(form) {
     const f = form.elements;
@@ -1727,10 +1756,21 @@
   }
   function saveCatalogSettings(form) {
     const f = form.elements;
-    Object.assign(data.settings, { catalogName: f.catalogName.value.trim() || 'Gelatos Lele', catalogIntro: f.catalogIntro.value.trim(), catalogPhone: f.catalogPhone.value.trim(), businessAddress: f.businessAddress.value.trim() });
-    save();
-    toast('Informações do cardápio atualizadas.');
-    navigate('settings:catalog');
+    const write = logo => {
+      Object.assign(data.settings, {
+        catalogName: f.catalogName.value.trim() || 'Gelatos Lele',
+        catalogIntro: f.catalogIntro.value.trim(),
+        catalogPhone: f.catalogPhone.value.trim(),
+        businessAddress: f.businessAddress.value.trim(),
+        catalogLogoDataUrl: logo || data.settings.catalogLogoDataUrl || ''
+      });
+      save();
+      toast('Informações do cardápio atualizadas.');
+      navigate('settings:catalog');
+    };
+    const logo = f.catalogLogo?.files?.[0];
+    if (!logo) { write(''); return; }
+    readFileDataUrl(logo).then(write).catch(error => toast(error.message || 'Não foi possível ler a logo.'));
   }
   function saveDeliverySettings(form) {
     const draft = deliveryDraftFromForm(form);

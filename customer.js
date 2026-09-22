@@ -28,7 +28,7 @@
     const type = productType(value);
     return type === 'Água' ? 'agua' : type === 'Leite' ? 'leite' : 'gourmet';
   };
-  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=35';
+  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=36';
   const ORDER_ATTEMPT_KEY = 'gelatos-lele-customer-order-attempt-v1';
   const CUSTOMER_CLIENT_KEY = 'gelatos-lele-customer-client-v1';
   const newAttemptId = () => (window.crypto?.randomUUID?.() || (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2)));
@@ -47,6 +47,7 @@
   let catalog = null;
   let quantities = {};
   let selectedProductId = '';
+  let openCategoryId = '';
   let reviewing = false;
   let draft = { customer: '', phone: '', mode: 'Retirada', zoneId: '', address: '', payment: 'Pix' };
   let orderAttemptId = '';
@@ -70,6 +71,7 @@
       sessionStorage.removeItem(ORDER_ATTEMPT_KEY);
     }
     selectedProductId = '';
+    openCategoryId = '';
     reviewing = false;
     render();
   }
@@ -153,6 +155,11 @@
       (opened ? '<section class="product-picker"><b>' + (soldOut ? 'Este sabor está esgotado.' : 'Quantos você quer?') + '</b>' + (soldOut ? '<span>Acompanhe o cardápio; ele volta a ficar disponível assim que houver produção.</span>' : '<div class="quantity"><button type="button" data-change="' + esc(product.id) + ':-1" aria-label="Diminuir ' + esc(product.name) + '"' + (chosen ? '' : ' disabled') + '>−</button><strong>' + chosen + '</strong><button type="button" data-change="' + esc(product.id) + ':1" aria-label="Aumentar ' + esc(product.name) + '"' + (chosen >= available ? ' disabled' : '') + '>+</button><small>Máximo disponível: ' + available + '</small></div>') + '</section>' : '') +
       '</article>';
   }
+  function categoryCard(group) {
+    const opened = String(openCategoryId) === String(group.category.id);
+    const count = group.products.length;
+    return '<section class="catalog-type ' + (opened ? 'is-open' : '') + '"><button type="button" class="catalog-type-heading catalog-category-toggle" data-action="toggle-category" data-category="' + esc(group.category.id) + '" aria-expanded="' + opened + '"><span><b>' + esc(group.category.name) + '</b><small>' + count + (count === 1 ? ' sabor disponível no cardápio' : ' sabores disponíveis no cardápio') + '</small></span><span class="catalog-category-action">' + (opened ? 'Fechar' : 'Ver sabores') + ' <i aria-hidden="true">⌄</i></span></button><div class="product-list"' + (opened ? '' : ' hidden') + '>' + group.products.map(productCard).join('') + '</div></section>';
+  }
   function totalsMarkup(result) {
     const freightText = !result.quantity ? 'Selecione os sabores' : !result.delivery ? 'R$ 0,00 (retirada)' : result.free ? 'Grátis' : result.zone ? money.format(result.fee) : 'A combinar';
     return '<div class="total total-breakdown"><span>Subtotal dos geladinhos</span><b>' + money.format(result.subtotal) + '</b><span>Frete' + (result.freeReason ? ' · ' + esc(result.freeReason) : '') + '</span><b>' + freightText + '</b><strong>Valor total</strong><strong>' + money.format(result.total) + '</strong></div>';
@@ -174,8 +181,9 @@
     const zones = deliveryZones();
     const modes = availableModes();
     const groups = catalogGroups();
-    const products = groups.length ? groups.map(group => '<section class="catalog-type"><div class="catalog-type-heading"><h3>' + esc(group.category.name) + '</h3><span>' + group.products.length + (group.products.length === 1 ? ' sabor' : ' sabores') + '</span></div><div class="product-list">' + group.products.map(productCard).join('') + '</div></section>').join('') : '<p class="empty">Nenhum sabor foi cadastrado no cardápio ainda.</p>';
-    root.innerHTML = '<section class="hero">' + managementBack() + '<h1>' + esc(catalog.brand || 'Gelatos Lele') + '</h1><p>' + esc(catalog.intro || 'Confira os sabores disponíveis.') + '</p></section>' +
+    const products = groups.length ? groups.map(categoryCard).join('') : '<p class="empty">Nenhum sabor foi cadastrado no cardápio ainda.</p>';
+    const logo = String(catalog.logo || 'logo-transparente-v2.png').trim();
+    root.innerHTML = '<section class="hero">' + managementBack() + '<img class="catalog-logo" src="' + esc(logo) + '" alt="' + esc(catalog.brand || 'Gelatos Lele') + '"><h1 class="catalog-brand-name">' + esc(catalog.brand || 'Gelatos Lele') + '</h1><p>' + esc(catalog.intro || 'Confira os sabores disponíveis.') + '</p></section>' +
       (catalog.address ? '<section class="notice"><b>Informações:</b><br>' + esc(catalog.address).replace(/\n/g, '<br>') + '</section>' : '') +
       '<section class="products"><div class="catalog-heading"><h2>Cardápio</h2><span>Escolha por tipo e toque em um sabor para informar a quantidade.</span></div>' + products + '</section>' +
       (reviewing ? reviewForm(result) : orderForm(result, zones, modes));
@@ -237,6 +245,15 @@
       syncDraft(document.getElementById('customerOrder'));
       const id = event.target.closest('[data-product]')?.dataset.product;
       selectedProductId = String(selectedProductId) === String(id) ? '' : id;
+      reviewing = false;
+      render();
+      return;
+    }
+    if (action === 'toggle-category') {
+      syncDraft(document.getElementById('customerOrder'));
+      const id = event.target.closest('[data-category]')?.dataset.category;
+      openCategoryId = String(openCategoryId) === String(id) ? '' : String(id || '');
+      selectedProductId = '';
       reviewing = false;
       render();
       return;
