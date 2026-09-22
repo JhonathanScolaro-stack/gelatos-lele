@@ -56,7 +56,8 @@ as $$
     select coalesce(jsonb_agg(jsonb_build_object(
       'id', regexp_replace(lower(trim(split_part(line, '|', 1))), '[^a-z0-9]+', '-', 'g'),
       'name', trim(split_part(line, '|', 1)),
-      'fee', coalesce(nullif(replace(replace(regexp_replace(split_part(line, '|', 2), '[^0-9,.-]', '', 'g'), '.', ''), ',', '.'), '')::numeric, 0)
+      'fee', coalesce(nullif(replace(replace(regexp_replace(split_part(line, '|', 2), '[^0-9,.-]', '', 'g'), '.', ''), ',', '.'), '')::numeric, 0),
+      'cost', coalesce(nullif(replace(replace(regexp_replace(split_part(line, '|', 3), '[^0-9,.-]', '', 'g'), '.', ''), ',', '.'), '')::numeric, 0)
     ) order by trim(split_part(line, '|', 1))), '[]'::jsonb) as items
     from settings, regexp_split_to_table(coalesce(settings.item->>'deliveryZones', ''), E'\\r?\\n') line
     where trim(split_part(line, '|', 1)) <> ''
@@ -156,6 +157,7 @@ $$;
 
 create or replace function public.gelatos_place_customer_order(
   p_slug text,
+  p_request_id text,
   p_customer text,
   p_mode text,
   p_zone_id text,
@@ -193,12 +195,29 @@ declare
   v_zone jsonb;
   v_order_id text := substr(md5(random()::text || clock_timestamp()::text), 1, 16);
   v_order jsonb;
+  v_existing jsonb;
+  v_delivery_cost numeric := 0;
+  v_payment_fee numeric := 0;
 begin
+  if length(trim(coalesce(p_request_id, ''))) < 8 then raise exception 'Não foi possível identificar este pedido. Atualize o cardápio e tente novamente.'; end if;
   if length(trim(coalesce(p_customer, ''))) < 2 then raise exception 'Informe o nome do cliente.'; end if;
   if jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then raise exception 'Escolha pelo menos um sabor.'; end if;
   select * into row_state from public.gelatos_company_state where store_slug = p_slug for update;
   if row_state.store_slug is null then raise exception 'Cardápio não encontrado.'; end if;
   v_data := row_state.data;
+  select entry.item into v_existing
+  from jsonb_array_elements(coalesce(v_data->'orders', '[]'::jsonb)) entry(item)
+  where entry.item->>'requestId' = trim(p_request_id)
+  limit 1;
+  if v_existing is not null then
+    return jsonb_build_object(
+      'orderId', v_existing->>'id',
+      'total', coalesce((v_existing->>'total')::numeric, 0),
+      'freight', coalesce((v_existing->>'freight')::numeric, 0),
+      'items', coalesce(v_existing->'items', '[]'::jsonb),
+      'replayed', true
+    );
+  end if;
   v_catalog := public.gelatos_make_catalog(v_data);
   v_is_delivery := lower(coalesce(p_mode, '')) like '%entrega%';
   if v_is_delivery and length(trim(coalesce(p_address, ''))) < 5 then raise exception 'Informe o endereço de entrega completo.'; end if;
@@ -232,9 +251,15 @@ begin
     if not ((v_free_value > 0 and v_subtotal >= v_free_value) or (v_free_items > 0 and v_item_count >= v_free_items)) then
       v_freight := coalesce((v_zone->>'fee')::numeric, 0);
     end if;
+    v_delivery_cost := coalesce((v_zone->>'cost')::numeric, 0);
   end if;
   v_total := round(v_subtotal + v_freight, 2);
-  v_order := jsonb_build_object('id', v_order_id, 'customer', trim(p_customer), 'phone', '', 'items', v_items, 'subtotal', round(v_subtotal, 2), 'freight', round(v_freight, 2), 'total', v_total, 'cost', round(v_cost, 2), 'profit', round(v_total - v_cost, 2), 'paymentMethod', coalesce(nullif(trim(p_payment), ''), 'Pix'), 'status', 'confirmed', 'date', current_date::text, 'dueDate', current_date::text, 'paidAt', '', 'deliveryMode', coalesce(p_mode, 'Retirada'), 'deliveryZone', coalesce(v_zone->>'name', ''), 'address', coalesce(p_address, ''), 'source', 'cardapio-cliente', 'createdAt', now()::text);
+  if lower(coalesce(p_payment, '')) like 'cr%' then
+    v_payment_fee := round(v_total * coalesce(nullif(replace(replace(regexp_replace(coalesce(v_data->'settings'->>'creditFeePercent', '0'), '[^0-9,.-]', '', 'g'), '.', ''), ',', '.'), '')::numeric, 0) / 100, 2);
+  elsif lower(coalesce(p_payment, '')) like 'd%' then
+    v_payment_fee := round(v_total * coalesce(nullif(replace(replace(regexp_replace(coalesce(v_data->'settings'->>'debitFeePercent', '0'), '[^0-9,.-]', '', 'g'), '.', ''), ',', '.'), '')::numeric, 0) / 100, 2);
+  end if;
+  v_order := jsonb_build_object('id', v_order_id, 'requestId', trim(p_request_id), 'customer', trim(p_customer), 'phone', '', 'items', v_items, 'subtotal', round(v_subtotal, 2), 'freight', round(v_freight, 2), 'total', v_total, 'cost', round(v_cost, 2), 'deliveryCost', round(v_delivery_cost, 2), 'paymentFee', round(v_payment_fee, 2), 'profit', round(v_total - v_cost - v_delivery_cost - v_payment_fee, 2), 'paymentMethod', coalesce(nullif(trim(p_payment), ''), 'Pix'), 'status', 'confirmed', 'date', current_date::text, 'dueDate', current_date::text, 'paidAt', '', 'deliveryMode', coalesce(p_mode, 'Retirada'), 'deliveryZone', coalesce(v_zone->>'name', ''), 'address', coalesce(p_address, ''), 'source', 'cardapio-cliente', 'createdAt', now()::text);
   v_data := jsonb_set(v_data, '{orders}', jsonb_build_array(v_order) || coalesce(v_data->'orders', '[]'::jsonb), true);
   v_data := jsonb_set(v_data, '{notifications}', jsonb_build_array(jsonb_build_object('id', v_order_id || '-notice', 'type', 'order', 'title', 'Novo pedido: ' || trim(p_customer), 'body', 'Pedido do cardápio no valor de R$ ' || replace(to_char(v_total, 'FM999999990D00'), '.', ','), 'route', 'orders-history', 'date', now()::text, 'read', false)) || coalesce(v_data->'notifications', '[]'::jsonb), true);
   update public.gelatos_company_state set data = v_data, revision = revision + 1, updated_at = now() where store_slug = p_slug;
@@ -248,8 +273,10 @@ grant select on table public.gelatos_public_catalog to anon, authenticated;
 revoke all on function public.gelatos_claim_store(text, text) from public;
 revoke all on function public.gelatos_get_state(text) from public;
 revoke all on function public.gelatos_save_state(text, jsonb, bigint) from public;
-revoke all on function public.gelatos_place_customer_order(text, text, text, text, text, text, jsonb) from public;
+revoke all on function public.gelatos_place_customer_order(text, text, text, text, text, text, text, jsonb) from public;
 grant execute on function public.gelatos_claim_store(text, text) to authenticated;
 grant execute on function public.gelatos_get_state(text) to authenticated;
 grant execute on function public.gelatos_save_state(text, jsonb, bigint) to authenticated;
+grant execute on function public.gelatos_place_customer_order(text, text, text, text, text, text, text, jsonb) to anon, authenticated;
+-- Mantém o aplicativo v32 temporariamente compatível enquanto o navegador atualiza o PWA.
 grant execute on function public.gelatos_place_customer_order(text, text, text, text, text, text, jsonb) to anon, authenticated;

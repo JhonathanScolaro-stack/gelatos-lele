@@ -100,19 +100,22 @@ window.GelatosCore = (() => {
     const paid = orders.filter(order => order.status === 'paid');
     const revenue = total(paid.map(order => ({ total: order.total })));
     const cost = total(paid.map(order => ({ total: order.cost })));
-    const expenseTotal = total(expenses.map(expense => ({ total: expense.total })));
-    const stockPurchases = total(expenses.filter(expense => expense.category === 'purchase').map(expense => ({ total: expense.total })));
-    const operationalExpense = total(expenses.filter(expense => expense.category !== 'purchase').map(expense => ({ total: expense.total })));
+    const paymentFees = total(paid.map(order => ({ total: order.paymentFee })));
+    const deliveryCosts = total(paid.map(order => ({ total: order.deliveryCost })));
+    const activeExpenses = expenses.filter(expense => !expense.voided);
+    const expenseTotal = total(activeExpenses.map(expense => ({ total: expense.total })));
+    const stockPurchases = total(activeExpenses.filter(expense => expense.category === 'purchase').map(expense => ({ total: expense.total })));
+    const operationalExpense = total(activeExpenses.filter(expense => expense.category !== 'purchase').map(expense => ({ total: expense.total })));
     const methods = ['Dinheiro', 'Pix', 'Crédito', 'Débito'].reduce((result, method) => {
       result[method] = money(
-        total(paid.filter(order => order.paymentMethod === method).map(order => ({ total: order.total }))) -
-        total(expenses.filter(expense => expense.paymentMethod === method).map(expense => ({ total: expense.total })))
+        total(paid.filter(order => order.paymentMethod === method).map(order => ({ total: money(order.total) - money(order.paymentFee) }))) -
+        total(activeExpenses.filter(expense => expense.paymentMethod === method).map(expense => ({ total: expense.total })))
       );
       return result;
     }, {});
     return {
-      revenue, cost, expenseTotal, stockPurchases, operationalExpense,
-      profit: money(revenue - cost - operationalExpense), methods
+      revenue, cost, paymentFees, deliveryCosts, expenseTotal, stockPurchases, operationalExpense,
+      profit: money(revenue - cost - paymentFees - deliveryCosts - operationalExpense), methods
     };
   }
   return { money, quantity: qty, receivePurchase, recipeCost, produce, validateOrder, financialSummary, convertQuantity };

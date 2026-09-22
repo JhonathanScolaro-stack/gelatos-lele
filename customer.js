@@ -28,7 +28,9 @@
     const type = productType(value);
     return type === 'Água' ? 'agua' : type === 'Leite' ? 'leite' : 'gourmet';
   };
-  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=32';
+  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=33';
+  const ORDER_ATTEMPT_KEY = 'gelatos-lele-customer-order-attempt-v1';
+  const newAttemptId = () => (window.crypto?.randomUUID?.() || (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2)));
   const managementBack = () => window.GelatosCloud?.hasSession?.()
     ? '<button type="button" class="back-app" data-action="back-customer">← Gestão</button>'
     : '';
@@ -38,6 +40,7 @@
   let selectedProductId = '';
   let reviewing = false;
   let draft = { customer: '', mode: 'Retirada', zoneId: '', address: '', payment: 'Pix' };
+  let orderAttemptId = '';
 
   function legacyCatalog() {
     try {
@@ -47,11 +50,16 @@
       return Array.isArray(parsed?.products) ? parsed : null;
     } catch (_) { return null; }
   }
-  function start(nextCatalog) {
+  function start(nextCatalog, preserveDraft = false) {
+    const previousQuantities = quantities;
     catalog = nextCatalog;
-    quantities = Object.fromEntries(catalog.products.map(product => [product.id, 0]));
+    quantities = Object.fromEntries(catalog.products.map(product => [product.id, preserveDraft ? num(previousQuantities[product.id]) : 0]));
     const modes = availableModes();
-    draft = { customer: '', mode: modes[0] || 'Retirada', zoneId: deliveryZones()[0]?.id || '', address: '', payment: 'Pix' };
+    if (!preserveDraft) {
+      draft = { customer: '', mode: modes[0] || 'Retirada', zoneId: deliveryZones()[0]?.id || '', address: '', payment: 'Pix' };
+      orderAttemptId = '';
+      sessionStorage.removeItem(ORDER_ATTEMPT_KEY);
+    }
     selectedProductId = '';
     reviewing = false;
     render();
@@ -164,12 +172,20 @@
   function confirmation(result) {
     const freight = num(result.freight) > 0 ? '<p>Frete: ' + money.format(num(result.freight)) + '</p>' : '';
     root.innerHTML = '<section class="hero">' + managementBack() + '<h1>Pedido confirmado</h1><p>Recebemos seu pedido e reservamos os geladinhos selecionados.</p></section><section class="panel confirmation"><h2>Total: ' + money.format(num(result.total)) + '</h2><p>Pedido nº ' + esc(result.orderId) + '. A Gelatos Lele confirmará os próximos passos.</p>' + freight + '<button class="primary" id="newOrder">Fazer outro pedido</button></section>';
-    document.getElementById('newOrder')?.addEventListener('click', loadCatalog);
+    document.getElementById('newOrder')?.addEventListener('click', () => {
+      orderAttemptId = '';
+      sessionStorage.removeItem(ORDER_ATTEMPT_KEY);
+      loadCatalog();
+    });
   }
   function reviewOrder() {
     syncDraft(document.getElementById('customerOrder'));
     const error = validateOrderDraft(orderTotals());
     if (error) { alert(error); return; }
+    if (!orderAttemptId) {
+      orderAttemptId = sessionStorage.getItem(ORDER_ATTEMPT_KEY) || newAttemptId();
+      sessionStorage.setItem(ORDER_ATTEMPT_KEY, orderAttemptId);
+    }
     reviewing = true;
     render();
     root.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -181,21 +197,21 @@
     const button = document.querySelector('#customerOrder button.primary');
     if (button) { button.disabled = true; button.textContent = 'Confirmando pedido…'; }
     try {
-      const saved = await window.GelatosCloud.placeCustomerOrder({ customer: draft.customer.trim(), mode: draft.mode, zoneId: draft.zoneId, address: draft.address.trim(), payment: draft.payment, items: result.selected.map(product => ({ productId: product.id, quantity: quantities[product.id] })) });
+      const saved = await window.GelatosCloud.placeCustomerOrder({ requestId: orderAttemptId, customer: draft.customer.trim(), mode: draft.mode, zoneId: draft.zoneId, address: draft.address.trim(), payment: draft.payment, items: result.selected.map(product => ({ productId: product.id, quantity: quantities[product.id] })) });
       applyConfirmedStock();
       confirmation(saved);
     } catch (error) {
       if (button) { button.disabled = false; button.textContent = 'Confirmar pedido'; }
-      alert(error.message || 'Não foi possível confirmar o pedido. Atualize a página e tente novamente.');
-      loadCatalog();
+      alert((error.message || 'Não foi possível confirmar o pedido.') + ' Vamos conferir o cardápio sem perder este pedido; tente confirmar novamente somente se ele não aparecer como confirmado.');
+      loadCatalog(true);
     }
   }
-  async function loadCatalog() {
+  async function loadCatalog(preserveDraft = false) {
     root.innerHTML = '<section class="error"><b>Carregando cardápio…</b><br>Estamos conferindo os sabores disponíveis.</section>';
-    try { start(await window.GelatosCloud.getCatalog()); }
+    try { start(await window.GelatosCloud.getCatalog(), preserveDraft); }
     catch (_) {
       const legacy = legacyCatalog();
-      if (legacy) { start(legacy); return; }
+      if (legacy) { start(legacy, preserveDraft); return; }
       root.innerHTML = '<section class="error"><b>Não foi possível abrir o cardápio agora.</b><br>Confira sua internet e tente novamente.</section>';
     }
   }

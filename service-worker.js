@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v32-categories-prices';
+const CACHE = 'gelatos-lele-company-v33-reliability';
 const ASSETS = [
   './',
   './index.html',
@@ -30,11 +30,23 @@ self.addEventListener('fetch', event => {
   // O catálogo e os pedidos vêm do Supabase. Nunca colocamos respostas do
   // banco no cache do navegador: assim o próximo cliente vê o estoque real.
   if (new URL(event.request.url).origin !== self.location.origin) return;
-  event.respondWith(
-    caches.match(event.request).then(cached => cached || fetch(event.request).then(response => {
+  const url = new URL(event.request.url);
+  // HTML sempre vem primeiro da rede. Assim quem instalou o app não fica preso
+  // em uma tela/script antigo depois que a empresa publica uma correção.
+  if (event.request.mode === 'navigate') {
+    const fallback = url.pathname.endsWith('/customer.html') ? './customer.html' : './index.html';
+    event.respondWith(fetch(event.request).then(response => {
       const copy = response.clone();
       caches.open(CACHE).then(cache => cache.put(event.request, copy));
       return response;
-    }).catch(() => caches.match('./index.html')))
-  );
+    }).catch(() => caches.match(fallback)));
+    return;
+  }
+  // Os arquivos usam ?v=33 para atualização. Ignorar só essa consulta mantém
+  // o app funcional offline com o mesmo arquivo que foi pré-armazenado.
+  event.respondWith(caches.match(event.request, { ignoreSearch: true }).then(cached => cached || fetch(event.request).then(response => {
+    const copy = response.clone();
+    caches.open(CACHE).then(cache => cache.put(event.request, copy));
+    return response;
+  })));
 });

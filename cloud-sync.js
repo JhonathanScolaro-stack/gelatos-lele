@@ -86,6 +86,7 @@
   async function placeCustomerOrder(order) {
     return rpc('gelatos_place_customer_order', {
       p_slug: config.storeSlug,
+      p_request_id: order.requestId,
       p_customer: order.customer,
       p_mode: order.mode,
       p_zone_id: order.zoneId,

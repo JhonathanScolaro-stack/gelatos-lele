@@ -77,7 +77,9 @@
     deliveryModes: 'Retirada,Entrega',
     deliveryZones: '',
     freeDeliveryMinValue: '',
-    freeDeliveryMinItems: ''
+    freeDeliveryMinItems: '',
+    creditFeePercent: '',
+    debitFeePercent: ''
   };
   const blankData = () => ({
     version: 18,
@@ -101,6 +103,8 @@
         averageUnitCost: Math.max(0, n(item.averageUnitCost)),
         minimumStock: Math.max(0, n(item.minimumStock)),
         unit: item.unit || 'un.',
+        active: item.active !== false,
+        archivedAt: item.archivedAt || '',
         movements: Array.isArray(item.movements) ? item.movements : []
       })) : [],
       recipes: Array.isArray(old.recipes) ? old.recipes.map(item => ({
@@ -131,6 +135,8 @@
         date: item.date || today(),
         dueDate: item.dueDate || item.date || today(),
         paidAt: item.paidAt || '',
+        paymentFee: Math.max(0, n(item.paymentFee)),
+        deliveryCost: Math.max(0, n(item.deliveryCost)),
         status: item.status || 'confirmed'
       })) : [],
       expenses: Array.isArray(old.expenses) ? old.expenses : [],
@@ -187,6 +193,9 @@
     return { id, name: categoryNameFrom(list, id, item?.productType) };
   };
   let cloudRevision = null;
+  // Última cópia confirmada pela nuvem. Ela permite conciliar duas alterações
+  // feitas em aparelhos diferentes sem simplesmente jogar fora uma delas.
+  let cloudBaseData = null;
   let cloudSyncTimer = null;
   let cloudSaving = false;
   let cloudPolling = false;
@@ -220,22 +229,111 @@
   // Ao abrir o app em um endereço novo, encaminhe para a entrada em vez de exibir um painel vazio.
   if (window.GelatosCloud && !window.GelatosCloud.hasSession()) state.screen = 'settings-cloud';
   function saveLocal() { localStorage.setItem(STORE, JSON.stringify(data)); }
+  const cloneData = value => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+  const sameData = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+  const isRecord = value => value && typeof value === 'object' && !Array.isArray(value);
+  function recordKey(value) {
+    if (!isRecord(value)) return '';
+    return value.id || value.recipeId || value.supplyId || value.productId || '';
+  }
+  function mergeCloudValue(base, local, remote, path, conflicts) {
+    if (sameData(local, remote)) return cloneData(local);
+    if (sameData(local, base)) return cloneData(remote);
+    if (sameData(remote, base)) return cloneData(local);
+    if (Array.isArray(local) && Array.isArray(remote)) return mergeCloudList(Array.isArray(base) ? base : [], local, remote, path, conflicts);
+    if (isRecord(local) && isRecord(remote)) {
+      const merged = {};
+      const baseRecord = isRecord(base) ? base : {};
+      new Set([...Object.keys(baseRecord), ...Object.keys(local), ...Object.keys(remote)]).forEach(key => {
+        const hasLocal = Object.prototype.hasOwnProperty.call(local, key);
+        const hasRemote = Object.prototype.hasOwnProperty.call(remote, key);
+        const hasBase = Object.prototype.hasOwnProperty.call(baseRecord, key);
+        if (!hasLocal && !hasRemote) return;
+        if (!hasLocal) {
+          if (!hasBase || !sameData(remote[key], baseRecord[key])) merged[key] = cloneData(remote[key]);
+          return;
+        }
+        if (!hasRemote) {
+          if (!hasBase || !sameData(local[key], baseRecord[key])) merged[key] = cloneData(local[key]);
+          return;
+        }
+        merged[key] = mergeCloudValue(baseRecord[key], local[key], remote[key], path + '.' + key, conflicts);
+      });
+      return merged;
+    }
+    // O mesmo campo foi alterado nos dois aparelhos. Mantemos a mudança local
+    // e registramos o conflito para que a pessoa confira, em vez de descartá-la
+    // silenciosamente como a versão anterior fazia.
+    conflicts.push(path);
+    return cloneData(local);
+  }
+  function mergeCloudList(base, local, remote, path, conflicts) {
+    const all = [...base, ...local, ...remote];
+    if (!all.every(item => recordKey(item))) {
+      return local.concat(remote.filter(item => !local.some(localItem => sameData(localItem, item))));
+    }
+    const mapFor = list => new Map(list.map(item => [String(recordKey(item)), item]));
+    const baseMap = mapFor(base), localMap = mapFor(local), remoteMap = mapFor(remote);
+    const keys = [...localMap.keys(), ...remoteMap.keys(), ...baseMap.keys()].filter((key, index, list) => list.indexOf(key) === index);
+    const merged = [];
+    keys.forEach(key => {
+      const hasBase = baseMap.has(key), hasLocal = localMap.has(key), hasRemote = remoteMap.has(key);
+      const baseItem = baseMap.get(key), localItem = localMap.get(key), remoteItem = remoteMap.get(key);
+      if (!hasLocal && !hasRemote) return;
+      if (!hasLocal) {
+        if (!hasBase || !sameData(remoteItem, baseItem)) merged.push(cloneData(remoteItem));
+        return;
+      }
+      if (!hasRemote) {
+        if (!hasBase || !sameData(localItem, baseItem)) merged.push(cloneData(localItem));
+        return;
+      }
+      merged.push(mergeCloudValue(baseItem, localItem, remoteItem, path + '[' + key + ']', conflicts));
+    });
+    return merged;
+  }
+  function reconcileCloudState(remoteState) {
+    const conflicts = [];
+    const remote = normalize(remoteState);
+    const base = cloudBaseData ? normalize(cloudBaseData) : remote;
+    const merged = normalize(mergeCloudValue(base, data, remote, 'dados', conflicts));
+    if (conflicts.length) {
+      merged.notifications.unshift({
+        id: uid(), type: 'sync', title: 'Revisar sincronização',
+        body: 'Algumas informações foram alteradas nos dois celulares. A alteração deste celular foi mantida nos campos: ' + conflicts.slice(0, 3).join(', ') + (conflicts.length > 3 ? '…' : '') + '.',
+        route: 'settings-cloud', date: new Date().toISOString(), read: false
+      });
+    }
+    return { merged, conflicts };
+  }
+  let cloudDirty = false;
   async function syncCloudNow(silent = false) {
     if (cloudSaving || cloudRevision === null || !window.GelatosCloud?.hasSession()) return;
     cloudSaving = true;
     try {
-      const saved = await window.GelatosCloud.saveState(data, cloudRevision);
+      const sent = cloneData(data);
+      const saved = await window.GelatosCloud.saveState(sent, cloudRevision);
       cloudRevision = Number(saved.revision);
+      cloudBaseData = cloneData(sent);
+      cloudDirty = !sameData(data, sent);
+      if (cloudDirty) queueCloudSave();
       if (!silent) toast('Alterações salvas na nuvem.');
     } catch (error) {
       if (/CONFLITO/i.test(error.message || '')) {
         try {
           const latest = await window.GelatosCloud.getState();
-          data = normalize(latest.state);
+          const reconciliation = reconcileCloudState(latest.state);
+          data = reconciliation.merged;
           cloudRevision = Number(latest.revision);
+          const mergedSnapshot = cloneData(data);
+          const saved = await window.GelatosCloud.saveState(mergedSnapshot, cloudRevision);
+          cloudRevision = Number(saved.revision);
+          cloudBaseData = cloneData(mergedSnapshot);
+          cloudDirty = !sameData(data, mergedSnapshot);
           saveLocal();
           render();
-          toast('Outra pessoa atualizou os dados. A tela foi atualizada para evitar perda de informações.');
+          if (cloudDirty) queueCloudSave();
+          toast(reconciliation.conflicts.length ? 'Dados conciliados. Há um aviso para revisar campos alterados nos dois celulares.' : 'Dados dos dois celulares foram conciliados e salvos.');
         } catch (_) { toast('Não foi possível atualizar os dados da nuvem agora.'); }
       } else if (!silent) {
         toast('Alteração guardada neste celular. A nuvem será tentada novamente quando houver internet.');
@@ -247,15 +345,27 @@
     clearTimeout(cloudSyncTimer);
     cloudSyncTimer = setTimeout(() => syncCloudNow(true), 800);
   }
-  const save = () => { saveLocal(); queueCloudSave(); };
+  const save = () => { saveLocal(); cloudDirty = true; queueCloudSave(); };
   async function refreshFromCloud(silent = true) {
     if (cloudPolling || cloudRevision === null || !window.GelatosCloud?.hasSession() || document.hidden) return;
     cloudPolling = true;
     try {
       const latest = await window.GelatosCloud.getState();
       if (Number(latest.revision) > Number(cloudRevision)) {
+        if (cloudDirty) {
+          const reconciliation = reconcileCloudState(latest.state);
+          data = reconciliation.merged;
+          cloudRevision = Number(latest.revision);
+          cloudBaseData = cloneData(normalize(latest.state));
+          saveLocal();
+          render();
+          queueCloudSave();
+          if (!silent) toast('Alterações dos dois celulares foram conciliadas.');
+          return;
+        }
         data = normalize(latest.state);
         cloudRevision = Number(latest.revision);
+        cloudBaseData = cloneData(data);
         saveLocal();
         render();
         if (!silent) toast('Dados atualizados pela nuvem.');
@@ -269,6 +379,8 @@
       const remote = await window.GelatosCloud.getState();
       data = normalize(remote.state);
       cloudRevision = Number(remote.revision);
+      cloudBaseData = cloneData(data);
+      cloudDirty = false;
       saveLocal();
       render();
     } catch (_) {
@@ -284,10 +396,12 @@
     try {
       const latest = await window.GelatosCloud.getState();
       if (Number(latest.revision) > Number(cloudRevision)) {
-        data = normalize(latest.state);
+        data = cloudDirty ? reconcileCloudState(latest.state).merged : normalize(latest.state);
         cloudRevision = Number(latest.revision);
+        cloudBaseData = cloneData(normalize(latest.state));
         saveLocal();
         render();
+        if (cloudDirty) queueCloudSave();
         toast('O estoque foi atualizado por um pedido novo. Confira as quantidades e confirme novamente.');
         return false;
       }
@@ -298,6 +412,7 @@
     }
   }
   const supplies = () => byId(data.supplies);
+  const activeSupplies = () => data.supplies.filter(item => item.active !== false);
   const ready = () => byId(data.readyStock, 'recipeId');
   const recipeById = () => byId(data.recipes);
   const headerLogo = () => data.settings.headerLogoDataUrl || 'logo-transparente-v2.png';
@@ -323,7 +438,7 @@
   }
   function refreshNotices() {
     const active = [];
-    data.supplies.forEach(item => {
+    activeSupplies().forEach(item => {
       if (n(item.minimumStock) > 0 && n(item.quantity) <= n(item.minimumStock)) {
         const key = 'min-supply-' + item.id;
         active.push(key);
@@ -346,15 +461,21 @@
   }
   function paymentBalances() {
     const values = Object.fromEntries(METHODS.map(method => [method, 0]));
-    data.orders.filter(order => order.status === 'paid').forEach(order => values[order.paymentMethod] = round(values[order.paymentMethod] + n(order.total)));
-    data.expenses.forEach(expense => values[expense.paymentMethod] = round(values[expense.paymentMethod] - n(expense.total)));
+    data.orders.filter(order => order.status === 'paid').forEach(order => values[order.paymentMethod] = round(values[order.paymentMethod] + n(order.total) - n(order.paymentFee)));
+    data.expenses.filter(expense => !expense.voided).forEach(expense => values[expense.paymentMethod] = round(values[expense.paymentMethod] - n(expense.total)));
     return values;
   }
   function finance(orders = data.orders.filter(order => order.status === 'paid'), expenses = data.expenses.filter(expense => expense.category !== 'purchase')) {
     const revenue = round(orders.reduce((sum, order) => sum + n(order.total), 0));
     const cost = round(orders.reduce((sum, order) => sum + n(order.cost), 0));
-    const expense = round(expenses.reduce((sum, item) => sum + n(item.total), 0));
-    return { revenue, cost, expense, profit: round(revenue - cost - expense) };
+    const paymentFee = round(orders.reduce((sum, order) => sum + n(order.paymentFee), 0));
+    const deliveryCost = round(orders.reduce((sum, order) => sum + n(order.deliveryCost), 0));
+    const expense = round(expenses.filter(item => !item.voided).reduce((sum, item) => sum + n(item.total), 0));
+    return { revenue, cost, paymentFee, deliveryCost, expense, profit: round(revenue - cost - paymentFee - deliveryCost - expense) };
+  }
+  function paymentFeeFor(total, payment) {
+    const rate = payment === 'Crédito' ? n(data.settings.creditFeePercent) : payment === 'Débito' ? n(data.settings.debitFeePercent) : 0;
+    return round(n(total) * Math.max(0, rate) / 100);
   }
   function laborCost(recipe, batches = 1) {
     const amount = n(recipe.laborAmount);
@@ -503,7 +624,7 @@
       metric('Recebido hoje', 'dashToday', 'Somente pedidos pagos', 'reports:finance:today') +
       metric('Faturamento do mês', 'dashMonth', 'Pedidos pagos no mês', 'reports:finance:month') +
       metric('Faturamento do ano', 'dashYear', 'Pedidos pagos no ano', 'reports:finance:year') +
-      metric('Lucro real do mês', 'dashProfit', 'Vendas − custo − despesas', 'reports:finance:month') +
+      metric('Lucro real do mês', 'dashProfit', 'Vendas − custos − taxas − despesas', 'reports:finance:month') +
       '</div><section class="panel balance-panel"><h2>Caixa e conta</h2><div class="payment-balances"><span>Dinheiro <b id="dashCash">—</b></span><span>Pix / conta <b id="dashPix">—</b></span><span>Crédito <b id="dashCredit">—</b></span><span>Débito <b id="dashDebit">—</b></span></div></section><h2 class="section-title">Sabores mais vendidos</h2><div class="best-grid">' +
       bestCard('Na semana', bestSellers(order => day(order.paidAt || order.date) >= weekStart), 'reports:orders:week') +
       bestCard('No mês', bestSellers(order => currentMonth(day(order.paidAt || order.date))), 'reports:orders:month') +
@@ -564,13 +685,13 @@
     let actions = '<button class="outline" data-action="edit-order" data-id="' + esc(order.id) + '">Editar</button><button class="secondary" data-action="send-order" data-id="' + esc(order.id) + '">Enviar confirmação</button>';
     if (order.status === 'confirmed') actions += '<button class="primary" data-action="mark-paid" data-id="' + esc(order.id) + '">Marcar como pago</button>';
     if (order.status !== 'cancelled') actions += '<button class="outline" data-action="cancel-order" data-id="' + esc(order.id) + '">Cancelar</button>';
-    actions += '<button class="outline danger-button" data-action="delete-order" data-id="' + esc(order.id) + '">Excluir</button>';
-    return detail(order.customer, brDate(order.date) + ' · vence ' + brDate(order.dueDate) + ' · ' + esc(order.paymentMethod), money(order.total), orderStatus(order), '<dl><dt>WhatsApp</dt><dd>' + esc(order.phone || 'não informado') + '</dd><dt>Custo vendido</dt><dd>' + money(order.cost) + '</dd><dt>Lucro da venda</dt><dd>' + money(order.profit) + '</dd></dl><h4>Checklist de separação</h4><div class="pick-list">' + pick + '</div><h4>Itens</h4><ul>' + lines + '</ul><div class="details-actions">' + actions + '</div>');
+    actions += '<button class="outline danger-button" data-action="delete-order" data-id="' + esc(order.id) + '">Arquivar</button>';
+    return detail(order.customer, brDate(order.date) + ' · vence ' + brDate(order.dueDate) + ' · ' + esc(order.paymentMethod), money(order.total), orderStatus(order), '<dl><dt>WhatsApp</dt><dd>' + esc(order.phone || 'não informado') + '</dd><dt>Custo vendido</dt><dd>' + money(order.cost) + '</dd><dt>Custo de entrega</dt><dd>' + money(order.deliveryCost) + '</dd><dt>Taxa de pagamento</dt><dd>' + money(order.paymentFee) + '</dd><dt>Lucro da venda</dt><dd>' + money(order.profit) + '</dd></dl><h4>Checklist de separação</h4><div class="pick-list">' + pick + '</div><h4>Itens</h4><ul>' + lines + '</ul><div class="details-actions">' + actions + '</div>');
   }
   function ordersScreen() {
     if (state.screen === 'orders-history') {
-      const cards = data.orders.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(orderCard).join('') || empty('Nenhum pedido criado ainda.');
-      return '<section class="screen active">' + heading('Controle de pedidos', 'Pedidos realizados', 'Abra um pedido para separar, editar, confirmar pagamento, cancelar ou excluir.') + '<div class="list">' + cards + '</div></section>';
+      const cards = data.orders.filter(order => !order.archived).slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(orderCard).join('') || empty('Nenhum pedido criado ainda.');
+      return '<section class="screen active">' + heading('Controle de pedidos', 'Pedidos realizados', 'Abra um pedido para separar, editar, confirmar pagamento, cancelar ou arquivar. O histórico financeiro continua preservado.') + '<div class="list">' + cards + '</div></section>';
     }
     const draft = state.orderDraft || { customer: '', phone: '', payment: 'Pix', date: today(), dueDate: today() };
     return '<section class="screen active">' + heading('Controle de pedidos', 'Novo pedido', 'Selecione os geladinhos prontos. O total é atualizado antes de confirmar.') + '<form id="orderForm" class="panel form-panel"><h2>Dados do cliente</h2><div class="form-grid two">' +
@@ -599,17 +720,18 @@
     if (state.screen === 'stock-ready') return readyScreen();
     const category = state.screen === 'stock-supply' ? 'supply' : 'ingredient';
     const label = category === 'supply' ? 'Estoque de insumos' : 'Estoque de ingredientes';
-    const cards = data.supplies.filter(item => item.category === category).sort((a, b) => a.name.localeCompare(b.name)).map(item => {
-      const moves = item.movements.slice(-8).reverse().map(move => '<li>' + brDate(move.date) + ' · ' + esc(move.kind) + ' · ' + (n(move.quantity) >= 0 ? '+' : '') + qtyText(move.quantity) + ' ' + esc(item.unit) + '</li>').join('') || '<li>Sem movimentações.</li>';
+    const cards = activeSupplies().filter(item => item.category === category).sort((a, b) => a.name.localeCompare(b.name)).map(item => {
+      const moves = item.movements.slice(-8).reverse().map(move => '<li>' + brDate(move.date) + ' · ' + esc(move.kind) + ' · ' + (n(move.quantity) >= 0 ? '+' : '') + qtyText(move.quantity) + ' ' + esc(item.unit) + (move.reason ? ' · ' + esc(move.reason) : '') + '</li>').join('') || '<li>Sem movimentações.</li>';
       const prices = purchaseStats(item);
       const priceSummary = prices.priced.length ? '<dt>Menor preço pago</dt><dd>' + money(prices.lowestEntry.unitPrice) + ' / ' + esc(item.unit) + '</dd><dt>Média das compras</dt><dd>' + money(prices.weightedAverage) + ' / ' + esc(item.unit) + '</dd>' : '<dt>Histórico de preços</dt><dd>Sem compras registradas</dd>';
       return detail(item.name, 'Quantidade: ' + qtyText(item.quantity) + ' ' + esc(item.unit) + ' · mínimo: ' + qtyText(item.minimumStock), money(item.averageUnitCost) + '/' + esc(item.unit), n(item.minimumStock) > 0 && n(item.quantity) <= n(item.minimumStock) ? 'mínimo' : 'em estoque', '<dl><dt>Quantidade atual</dt><dd>' + qtyText(item.quantity) + ' ' + esc(item.unit) + '</dd><dt>Custo médio do estoque</dt><dd>' + money(item.averageUnitCost) + ' / ' + esc(item.unit) + '</dd><dt>Valor em estoque</dt><dd>' + money(n(item.quantity) * n(item.averageUnitCost)) + '</dd><dt>Última compra</dt><dd>' + brDate(item.lastPurchaseAt) + '</dd><dt>Fornecedor</dt><dd>' + esc(item.lastSupplierName || '—') + '</dd>' + priceSummary + '</dl><h4>Movimentações recentes</h4><ul>' + moves + '</ul><div class="details-actions"><button class="secondary" data-action="inspect-price" data-id="' + esc(item.id) + '">Consultar preços</button><button class="outline" data-action="edit-supply" data-id="' + esc(item.id) + '">Editar</button><button class="outline danger-button" data-action="delete-supply" data-id="' + esc(item.id) + '">Excluir</button></div>');
     }).join('') || empty('Nenhum item cadastrado.');
-    return '<section class="screen active">' + heading('Controle de estoque', label, 'Toque em um item para conferir movimentações ou editar todas as informações.') + '<div class="isolated-actions"><button class="primary" data-route="stock:purchase">Cadastrar nova compra</button></div><div class="list">' + cards + '</div></section>';
+    const archived = data.supplies.filter(item => item.category === category && item.active === false).map(item => '<li><b>' + esc(item.name) + '</b><span>Histórico preservado</span><button class="outline" data-action="restore-supply" data-id="' + esc(item.id) + '">Reativar</button></li>').join('');
+    return '<section class="screen active">' + heading('Controle de estoque', label, 'Toque em um item para conferir movimentações ou editar todas as informações.') + '<div class="isolated-actions"><button class="primary" data-route="stock:purchase">Cadastrar nova compra</button></div><div class="list">' + cards + '</div>' + (archived ? '<details class="panel archived-list"><summary>Itens arquivados</summary><ul>' + archived + '</ul></details>' : '') + '</section>';
   }
   function purchaseScreen() {
     return '<section class="screen active">' + heading('Controle de estoque', 'Cadastrar compra', 'Registre a entrada uma vez. O custo médio e o financeiro são atualizados automaticamente.') + '<form id="purchaseForm" class="panel form-panel"><div class="form-grid two">' +
-      field('Item já cadastrado', '<select name="supplyId">' + options(data.supplies.slice().sort((a, b) => a.name.localeCompare(b.name)), '', item => item.name + ' (' + qtyText(item.quantity) + ' ' + item.unit + ')') + '</select>', 'Selecione aqui quando estiver comprando novamente algo que já existe.') +
+      field('Item já cadastrado', '<select name="supplyId">' + options(activeSupplies().slice().sort((a, b) => a.name.localeCompare(b.name)), '', item => item.name + ' (' + qtyText(item.quantity) + ' ' + item.unit + ')') + '</select>', 'Selecione aqui quando estiver comprando novamente algo que já existe.') +
       field('Ou nome do novo item', '<input name="newName" placeholder="Ex.: Leite integral">', 'Preencha somente se este item ainda não foi cadastrado.') +
       field('Tipo do novo item', '<select name="category"><option value="ingredient">Ingrediente</option><option value="supply">Insumo / embalagem</option></select>') +
       field('Unidade de medida', '<select name="unit"><option>un.</option><option>pacote</option><option>L</option><option>ml</option><option>kg</option><option>g</option><option>rolo</option><option>caixa</option></select>') +
@@ -651,7 +773,7 @@
       field('Estoque mínimo', '<input name="minimumStock" inputmode="decimal" value="' + esc(qtyInput(item.minimumStock)) + '">') +
       field('Data da última compra', '<input name="lastPurchaseAt" type="date" value="' + esc(item.lastPurchaseAt || '') + '">') +
       field('Fornecedor da última compra', '<input name="lastSupplierName" value="' + esc(item.lastSupplierName || '') + '">') +
-      '</div><div class="button-row"><button class="primary">Salvar todas as alterações</button><button class="outline" type="button" data-route="stock:' + (item.category === 'supply' ? 'supply' : 'ingredient') + '">Cancelar</button><button class="outline danger-button" type="button" data-action="delete-supply" data-id="' + esc(item.id) + '">Excluir cadastro</button></div></form></section>';
+      '</div><label class="form-field"><span>Motivo da correção de quantidade' + info('Obrigatório somente se a quantidade atual for alterada. Fica no histórico para vocês saberem por que o saldo mudou.', 'Ajuste de estoque') + '</span><textarea name="adjustmentReason" rows="2" placeholder="Ex.: conferência física, perda, item vencido"></textarea></label><div class="button-row"><button class="primary">Salvar todas as alterações</button><button class="outline" type="button" data-route="stock:' + (item.category === 'supply' ? 'supply' : 'ingredient') + '">Cancelar</button><button class="outline danger-button" type="button" data-action="delete-supply" data-id="' + esc(item.id) + '">Excluir cadastro</button></div></form></section>';
   }
   function readyEditScreen() {
     const item = ready()[state.editReady];
@@ -661,10 +783,10 @@
       field('Custo por unidade (R$)', '<input name="unitCost" required inputmode="decimal" value="' + esc(String(item.unitCost).replace('.', ',')) + '">') +
       field('Preço de venda (R$)', '<input name="saleUnitPrice" required inputmode="decimal" value="' + esc(String(item.saleUnitPrice).replace('.', ',')) + '">') +
       field('Estoque mínimo', '<input name="minimumStock" inputmode="decimal" value="' + esc(String(item.minimumStock).replace('.', ',')) + '">') +
-      '</div><div class="button-row"><button class="primary">Salvar todas as alterações</button><button class="outline" type="button" data-route="stock:ready">Cancelar</button><button class="outline danger-button" type="button" data-action="delete-ready" data-id="' + esc(item.recipeId) + '">Excluir cadastro vazio</button></div></form></section>';
+      '</div><label class="form-field"><span>Motivo da correção de quantidade' + info('Obrigatório somente se a quantidade pronta for alterada. Fica registrado no histórico.', 'Ajuste de estoque') + '</span><textarea name="adjustmentReason" rows="2" placeholder="Ex.: conferência física, perda, degustação"></textarea></label><div class="button-row"><button class="primary">Salvar todas as alterações</button><button class="outline" type="button" data-route="stock:ready">Cancelar</button><button class="outline danger-button" type="button" data-action="delete-ready" data-id="' + esc(item.recipeId) + '">Excluir cadastro vazio</button></div></form></section>';
   }
   function recipeRows() {
-    const list = data.supplies.slice().sort((a, b) => a.name.localeCompare(b.name));
+    const list = activeSupplies().slice().sort((a, b) => a.name.localeCompare(b.name));
     return state.recipeLines.map((line, index) => '<div class="recipe-item"><select data-recipe-supply="' + index + '">' + options(list, line.supplyId, item => item.name + ' (' + item.unit + ')') + '</select><input data-recipe-quantity="' + index + '" inputmode="decimal" value="' + esc(line.quantity) + '" aria-label="Quantidade"><input data-recipe-unit="' + index + '" value="' + esc(line.unit) + '" aria-label="Unidade"><button class="line-remove" type="button" data-action="remove-recipe-line" data-index="' + index + '" aria-label="Remover ingrediente">×</button></div>').join('');
   }
   function recipeDraftFromScreen() {
@@ -789,18 +911,21 @@
       return '<section class="screen active">' + heading('Financeiro', 'Contas a receber', 'Pedidos confirmados que só entram no faturamento depois do pagamento.') + '<div class="list">' + cards + '</div></section>';
     }
     if (view === 'payable') {
-      const cards = data.expenses.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(item => {
-        const action = item.category === 'purchase' ? '<p class="form-note">Esta compra é corrigida pelo item de estoque.</p>' : '<div class="details-actions"><button class="outline" data-action="edit-expense" data-id="' + esc(item.id) + '">Editar</button><button class="outline danger-button" data-action="delete-expense" data-id="' + esc(item.id) + '">Excluir</button></div>';
+      const cards = data.expenses.filter(item => !item.voided).slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(item => {
+        const action = item.category === 'purchase' ? '<p class="form-note">Esta compra é corrigida pelo item de estoque.</p>' : '<div class="details-actions"><button class="outline" data-action="edit-expense" data-id="' + esc(item.id) + '">Editar</button><button class="outline danger-button" data-action="delete-expense" data-id="' + esc(item.id) + '">Anular</button></div>';
         return detail(item.name, brDate(item.date) + ' · ' + esc(item.paymentMethod), '− ' + money(item.total), item.category === 'purchase' ? 'compra' : 'paga', '<dl><dt>Data</dt><dd>' + brDate(item.date) + '</dd><dt>Pago com</dt><dd>' + esc(item.paymentMethod) + '</dd></dl>' + action);
       }).join('') || empty('Nenhuma conta paga registrada.');
-      return '<section class="screen active">' + heading('Financeiro', 'Contas pagas', 'Registre despesas operacionais. As compras de estoque entram automaticamente.') + expenseForm() + '<div class="list">' + cards + '</div></section>';
+      const voided = data.expenses.filter(item => item.voided).map(item => '<li><b>' + esc(item.name) + '</b><span>Anulada; permanece no histórico</span><button class="outline" data-action="restore-expense" data-id="' + esc(item.id) + '">Restaurar</button></li>').join('');
+      return '<section class="screen active">' + heading('Financeiro', 'Contas pagas', 'Registre despesas operacionais. As compras de estoque entram automaticamente.') + expenseForm() + '<div class="list">' + cards + '</div>' + (voided ? '<details class="panel archived-list"><summary>Contas anuladas</summary><ul>' + voided + '</ul></details>' : '') + '</section>';
     }
     return '<section class="screen active">' + heading('Financeiro', 'Visão financeira', 'Cada cartão leva para a parte correspondente.') + '<div class="dashboard-grid finance-metrics">' +
       metric('Faturamento', 'financeRevenue', 'Pedidos pagos', 'reports:finance') +
       metric('Custo vendido', 'financeCost', 'Produtos dos pedidos pagos', 'reports:finance') +
+      metric('Taxas de cartão', 'financeFees', 'Taxas configuradas no pagamento', 'reports:finance') +
+      metric('Custo de entrega', 'financeDelivery', 'Custo configurado por local', 'reports:finance') +
       metric('Despesas operacionais', 'financeExpense', 'Contas pagas', 'finance:payable') +
-      metric('Lucro real', 'financeProfit', 'Receita − custo − despesas', 'reports:finance', true) +
-      '</div><section class="panel balance-panel"><h2>Saldo por forma de pagamento</h2><div class="payment-balances"><span>Dinheiro <b>' + money(balances.Dinheiro) + '</b></span><span>Pix / conta <b>' + money(balances.Pix) + '</b></span><span>Crédito <b>' + money(balances.Crédito) + '</b></span><span>Débito <b>' + money(balances.Débito) + '</b></span></div></section><section class="panel"><p class="form-note">Resultado atual: faturamento ' + money(summary.revenue) + ' − custo vendido ' + money(summary.cost) + ' − despesas operacionais ' + money(summary.expense) + '.</p></section></section>';
+      metric('Lucro real', 'financeProfit', 'Receita − custos − taxas − despesas', 'reports:finance', true) +
+      '</div><section class="panel balance-panel"><h2>Saldo por forma de pagamento</h2><div class="payment-balances"><span>Dinheiro <b>' + money(balances.Dinheiro) + '</b></span><span>Pix / conta <b>' + money(balances.Pix) + '</b></span><span>Crédito <b>' + money(balances.Crédito) + '</b></span><span>Débito <b>' + money(balances.Débito) + '</b></span></div></section><section class="panel"><p class="form-note">Resultado atual: faturamento ' + money(summary.revenue) + ' − custo vendido ' + money(summary.cost) + ' − taxas ' + money(summary.paymentFee) + ' − custo de entrega ' + money(summary.deliveryCost) + ' − despesas operacionais ' + money(summary.expense) + '.</p></section></section>';
   }
   function orderDestination(order) {
     const mode = String(order.deliveryMode || order.mode || '').trim();
@@ -827,7 +952,7 @@
       const location = orderDestination(order);
       return { date: day(order.date), name: order.customer, items: order.items.map(line => line.productName).join(', '), payment: order.paymentMethod, status: orderStatus(order), location, address: String(order.address || '').trim(), value: n(order.total), search: order.customer + ' ' + location + ' ' + String(order.address || '') + ' ' + order.items.map(line => line.productName).join(' ') };
     });
-    if (kind === 'finance') rows = data.orders.filter(order => order.status === 'paid').map(order => ({ date: day(order.paidAt || order.date), name: order.customer, type: 'Entrada', payment: order.paymentMethod, status: 'pago', value: n(order.total), cost: n(order.cost), search: order.customer + ' ' + order.items.map(line => line.productName).join(' ') })).concat(data.expenses.map(item => ({ date: day(item.date), name: item.name, type: 'Saída', payment: item.paymentMethod, status: item.category === 'purchase' ? 'compra' : 'paga', value: -n(item.total), cost: 0, search: item.name })));
+    if (kind === 'finance') rows = data.orders.filter(order => order.status === 'paid').map(order => ({ date: day(order.paidAt || order.date), name: order.customer, type: 'Entrada', payment: order.paymentMethod, status: 'pago', value: n(order.total), cost: n(order.cost), search: order.customer + ' ' + order.items.map(line => line.productName).join(' ') })).concat(data.expenses.map(item => ({ date: day(item.date), name: item.name, type: item.voided ? 'Saída anulada' : 'Saída', payment: item.paymentMethod, status: item.voided ? 'anulada' : item.category === 'purchase' ? 'compra' : 'paga', value: item.voided ? 0 : -n(item.total), cost: 0, search: item.name })));
     if (kind === 'stock') {
       data.supplies.forEach(item => item.movements.forEach(move => rows.push({ date: day(move.date), name: item.name, type: move.kind, quantity: n(move.quantity), unit: item.unit, payment: move.paymentMethod || '', status: '', value: n(move.total), search: item.name + ' ' + move.kind })));
       data.readyStock.forEach(item => item.movements.forEach(move => rows.push({ date: day(move.date), name: item.name, type: move.kind, quantity: n(move.quantity), unit: 'un.', payment: '', status: '', value: 0, search: item.name + ' ' + move.kind })));
@@ -1008,9 +1133,9 @@
   }
   function deliveryZoneRows(value) {
     return String(value || '').split(/\r?\n/).map(line => {
-      const [city, ...feeParts] = line.split('|');
-      return { city: String(city || '').trim(), fee: feeParts.join('|').trim() };
-    }).filter(row => row.city || row.fee);
+      const [city, fee = '', deliveryCost = ''] = line.split('|');
+      return { city: String(city || '').trim(), fee: String(fee || '').trim(), deliveryCost: String(deliveryCost || '').trim() };
+    }).filter(row => row.city || row.fee || row.deliveryCost);
   }
   function defaultDeliveryDraft() {
     return {
@@ -1018,6 +1143,8 @@
       pickupAddress: data.settings.pickupAddress || '',
       freeDeliveryMinValue: data.settings.freeDeliveryMinValue || '',
       freeDeliveryMinItems: data.settings.freeDeliveryMinItems || '',
+      creditFeePercent: data.settings.creditFeePercent || '',
+      debitFeePercent: data.settings.debitFeePercent || '',
       zones: deliveryZoneRows(data.settings.deliveryZones)
     };
   }
@@ -1029,15 +1156,18 @@
       pickupAddress: f.pickupAddress.value,
       freeDeliveryMinValue: f.freeDeliveryMinValue.value,
       freeDeliveryMinItems: f.freeDeliveryMinItems.value,
+      creditFeePercent: f.creditFeePercent.value,
+      debitFeePercent: f.debitFeePercent.value,
       zones: Array.from(form.querySelectorAll('[data-delivery-zone]')).map(row => ({
         city: row.querySelector('[data-zone-city]')?.value.trim() || '',
-        fee: row.querySelector('[data-zone-fee]')?.value.trim() || ''
+        fee: row.querySelector('[data-zone-fee]')?.value.trim() || '',
+        deliveryCost: row.querySelector('[data-zone-cost]')?.value.trim() || ''
       }))
     };
   }
   function deliveryZoneFields(draft) {
-    const rows = draft.zones.length ? draft.zones : [{ city: '', fee: '' }];
-    return '<section class="delivery-zones"><h2>Locais e taxas de frete</h2><p class="form-note">Cadastre cada cidade ou bairro e o valor. O cliente escolhe um dos locais no cardápio.</p>' + rows.map((row, index) => '<div class="delivery-zone-row" data-delivery-zone><label>Cidade ou bairro<input data-zone-city="' + index + '" value="' + esc(row.city) + '" placeholder="Ex.: Águas do Centro"></label><label>Valor do frete (R$)<input data-zone-fee="' + index + '" inputmode="decimal" value="' + esc(row.fee) + '" placeholder="Ex.: 5,00"></label><button class="line-remove" type="button" data-action="remove-delivery-zone" data-index="' + index + '" aria-label="Remover local">×</button></div>').join('') + '<button class="outline full" type="button" data-action="add-delivery-zone">+ Adicionar cidade ou bairro</button></section>';
+    const rows = draft.zones.length ? draft.zones : [{ city: '', fee: '', deliveryCost: '' }];
+    return '<section class="delivery-zones"><h2>Locais, frete e custo da entrega</h2><p class="form-note">O frete é o valor que o cliente paga. O custo é o que a empresa paga ao entregador; deixe em branco se não houver custo fixo.</p>' + rows.map((row, index) => '<div class="delivery-zone-row" data-delivery-zone><label>Cidade ou bairro<input data-zone-city="' + index + '" value="' + esc(row.city) + '" placeholder="Ex.: Águas do Centro"></label><label>Frete cobrado (R$)<input data-zone-fee="' + index + '" inputmode="decimal" value="' + esc(row.fee) + '" placeholder="Ex.: 5,00"></label><label>Custo da entrega (R$)<input data-zone-cost="' + index + '" inputmode="decimal" value="' + esc(row.deliveryCost) + '" placeholder="Ex.: 3,00"></label><button class="line-remove" type="button" data-action="remove-delivery-zone" data-index="' + index + '" aria-label="Remover local">×</button></div>').join('') + '<button class="outline full" type="button" data-action="add-delivery-zone">+ Adicionar cidade ou bairro</button></section>';
   }
   function settingsScreen() {
     const section = state.screen.replace('settings-', '');
@@ -1075,6 +1205,7 @@
         field('Formas de receber', '<input name="deliveryModes" value="' + esc(draft.deliveryModes) + '">', 'Separe as opções por vírgula. Ex.: Retirada,Entrega.') +
         field('Endereço para retirada', '<textarea name="pickupAddress" rows="3" placeholder="Ex.: Rua das Flores, 123 — Centro">' + esc(draft.pickupAddress) + '</textarea>', 'Aparece ao cliente somente quando ele escolher Retirada. Inclua endereço, horário e ponto de referência se desejar.') +
         deliveryZoneFields(draft) +
+        '<section class="panel nested-panel"><h2>Taxas de cartão</h2><p class="form-note">Essas taxas são descontadas do lucro e do saldo esperado de Crédito/Débito. Deixe em branco ou zero se não quiser calcular agora.</p><div class="form-grid two">' + field('Taxa de crédito (%)', '<input name="creditFeePercent" inputmode="decimal" value="' + esc(draft.creditFeePercent) + '" placeholder="Ex.: 3,49">') + field('Taxa de débito (%)', '<input name="debitFeePercent" inputmode="decimal" value="' + esc(draft.debitFeePercent) + '" placeholder="Ex.: 1,99">') + '</div></section>' +
         field('Frete grátis acima de valor (R$)', '<input name="freeDeliveryMinValue" inputmode="decimal" value="' + esc(draft.freeDeliveryMinValue) + '" placeholder="Ex.: 50,00">', 'Deixe em branco se não quiser esta regra. O frete fica grátis quando o subtotal dos geladinhos atingir este valor.') +
         field('Frete grátis acima de quantidade', '<input name="freeDeliveryMinItems" inputmode="decimal" value="' + esc(draft.freeDeliveryMinItems) + '" placeholder="Ex.: 10">', 'Deixe em branco se não quiser esta regra. O frete fica grátis quando a quantidade total atingir este número.') +
         '<button class="primary full">Salvar frete e entrega</button></form><section class="panel"><h2>Como o cliente verá</h2><p>Ao escolher Entrega, ele seleciona o local e vê subtotal, frete e total antes de enviar o pedido.</p></section></section>';
@@ -1086,9 +1217,8 @@
   }
   function deliveryZones(value) {
     return String(value || '').split(/\r?\n/).map(line => {
-      const [name, ...feeParts] = line.split('|');
-      const fee = n(feeParts.join('|'));
-      return { id: String(name || '').trim().toLocaleLowerCase('pt-BR').replace(/[^a-z0-9]+/g, '-'), name: String(name || '').trim(), fee: Math.max(0, fee) };
+      const [name, feeText = '', costText = ''] = line.split('|');
+      return { id: String(name || '').trim().toLocaleLowerCase('pt-BR').replace(/[^a-z0-9]+/g, '-'), name: String(name || '').trim(), fee: Math.max(0, n(feeText)), cost: Math.max(0, n(costText)) };
     }).filter(zone => zone.name);
   }
   function catalogPayload() {
@@ -1118,7 +1248,7 @@
   }
   function catalogLink() {
     try {
-      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=32';
+      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=33';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -1158,6 +1288,8 @@
     set('dashDebit', money(balances.Débito));
     set('financeRevenue', money(finance().revenue));
     set('financeCost', money(finance().cost));
+    set('financeFees', money(finance().paymentFee));
+    set('financeDelivery', money(finance().deliveryCost));
     set('financeExpense', money(finance().expense));
     set('financeProfit', money(finance().profit));
   }
@@ -1227,7 +1359,8 @@
     if (!editing) {
       try {
         const result = reserveOrder(lines, date, 'Pedido confirmado');
-        data.orders.unshift({ id: uid(), customer, phone: f.phone.value.trim(), items: result.lines.map(line => ({ ...line, picked: false })), total: result.revenue, cost: result.cost, profit: result.profit, paymentMethod: f.payment.value, status: 'confirmed', date, dueDate: f.dueDate.value || date, paidAt: '' });
+        const paymentFee = paymentFeeFor(result.revenue, f.payment.value);
+        data.orders.unshift({ id: uid(), customer, phone: f.phone.value.trim(), items: result.lines.map(line => ({ ...line, picked: false })), total: result.revenue, cost: result.cost, deliveryCost: 0, paymentFee, profit: round(result.profit - paymentFee), paymentMethod: f.payment.value, status: 'confirmed', date, dueDate: f.dueDate.value || date, paidAt: '' });
         state.orderLines = [{ productId: '', quantity: 1 }];
         state.orderDraft = null;
         addNotice('order', 'Pedido confirmado: ' + customer, 'Total de ' + money(result.revenue) + ' aguardando pagamento.', 'orders-history');
@@ -1243,7 +1376,11 @@
     try {
       if (old.status !== 'cancelled') returnOrder(old, date, 'Estorno para edição');
       const result = reserveOrder(lines, date, 'Pedido editado');
-      Object.assign(old, { customer, phone: f.phone.value.trim(), items: result.lines.map(line => ({ ...line, picked: false })), total: result.revenue, cost: result.cost, profit: result.profit, paymentMethod: f.payment.value, date, dueDate: f.dueDate.value || date, status: old.status === 'cancelled' ? 'confirmed' : old.status });
+      const freight = Math.max(0, n(old.freight));
+      const total = round(result.revenue + freight);
+      const paymentFee = paymentFeeFor(total, f.payment.value);
+      const deliveryCost = Math.max(0, n(old.deliveryCost));
+      Object.assign(old, { customer, phone: f.phone.value.trim(), items: result.lines.map(line => ({ ...line, picked: false })), subtotal: result.revenue, total, cost: result.cost, deliveryCost, paymentFee, profit: round(total - result.cost - deliveryCost - paymentFee), paymentMethod: f.payment.value, date, dueDate: f.dueDate.value || date, status: old.status === 'cancelled' ? 'confirmed' : old.status });
       state.editOrder = '';
       state.orderLines = [{ productId: '', quantity: 1 }];
       state.orderDraft = null;
@@ -1299,7 +1436,12 @@
     }
     const quantity = Math.max(0, n(f.quantity.value));
     const difference = qty(quantity - n(item.quantity));
-    if (difference) item.movements.push({ id: uid(), kind: 'Ajuste manual', quantity: difference, total: 0, date: today() });
+    const reason = String(f.adjustmentReason?.value || '').trim();
+    if (difference && !reason) {
+      toast('Informe o motivo da correção de quantidade para preservar o histórico.');
+      return;
+    }
+    if (difference) item.movements.push({ id: uid(), kind: 'Ajuste manual', quantity: difference, total: 0, date: today(), reason, previousQuantity: n(item.quantity), resultingQuantity: quantity });
     Object.assign(item, { name: control(form, 'name').value.trim(), category: f.category.value, unit: f.unit.value.trim(), quantity, averageUnitCost: Math.max(0, n(f.averageUnitCost.value)), minimumStock: Math.max(0, n(f.minimumStock.value)), lastPurchaseAt: f.lastPurchaseAt.value, lastSupplierName: f.lastSupplierName.value.trim() });
     state.editSupply = '';
     save();
@@ -1312,7 +1454,12 @@
     if (!item) return;
     const quantity = Math.max(0, n(f.quantity.value));
     const difference = qty(quantity - n(item.quantity));
-    if (difference) item.movements.push({ id: uid(), kind: 'Ajuste manual', quantity: difference, date: today() });
+    const reason = String(f.adjustmentReason?.value || '').trim();
+    if (difference && !reason) {
+      toast('Informe o motivo da correção de quantidade para preservar o histórico.');
+      return;
+    }
+    if (difference) item.movements.push({ id: uid(), kind: 'Ajuste manual', quantity: difference, date: today(), reason, previousQuantity: n(item.quantity), resultingQuantity: quantity });
     Object.assign(item, { quantity, unitCost: Math.max(0, n(f.unitCost.value)), saleUnitPrice: Math.max(0, n(f.saleUnitPrice.value)), minimumStock: Math.max(0, n(f.minimumStock.value)) });
     state.editReady = '';
     save();
@@ -1544,9 +1691,11 @@
     Object.assign(data.settings, {
       deliveryModes: draft.deliveryModes.trim() || 'Retirada,Entrega',
       pickupAddress: draft.pickupAddress.trim(),
-      deliveryZones: zones.map(zone => zone.city.trim() + ' | ' + n(zone.fee).toFixed(2).replace('.', ',')).join('\n'),
+      deliveryZones: zones.map(zone => zone.city.trim() + ' | ' + n(zone.fee).toFixed(2).replace('.', ',') + ' | ' + n(zone.deliveryCost).toFixed(2).replace('.', ',')).join('\n'),
       freeDeliveryMinValue: draft.freeDeliveryMinValue.trim(),
-      freeDeliveryMinItems: draft.freeDeliveryMinItems.trim()
+      freeDeliveryMinItems: draft.freeDeliveryMinItems.trim(),
+      creditFeePercent: draft.creditFeePercent.trim(),
+      debitFeePercent: draft.debitFeePercent.trim()
     });
     state.deliveryDraft = null;
     save();
@@ -1587,20 +1736,33 @@
   }
   function cancelOrder(id) {
     const order = data.orders.find(item => String(item.id) === String(id));
-    if (!order || order.status === 'cancelled' || !confirm('Cancelar este pedido e devolver os geladinhos ao estoque?')) return;
+    const question = order?.status === 'paid'
+      ? 'Este pedido já foi marcado como pago. Confirme somente depois de devolver ou combinar o valor com o cliente. Cancelar devolverá os geladinhos e retirará a venda do faturamento.'
+      : 'Cancelar este pedido e devolver os geladinhos ao estoque?';
+    if (!order || order.status === 'cancelled' || !confirm(question)) return;
     returnOrder(order, today(), 'Pedido cancelado');
     order.status = 'cancelled';
+    order.cancelledAt = today();
     save();
     toast('Pedido cancelado e estoque devolvido.');
     render();
   }
   function deleteOrder(id) {
     const order = data.orders.find(item => String(item.id) === String(id));
-    if (!order || !confirm('Excluir este pedido?')) return;
-    if (order.status !== 'cancelled') returnOrder(order, today(), 'Pedido excluído');
-    data.orders = data.orders.filter(item => String(item.id) !== String(id));
+    if (!order) return;
+    if (order.status === 'paid') {
+      toast('Pedidos pagos não podem ser arquivados como se nunca tivessem existido. Use Cancelar após tratar o reembolso.');
+      return;
+    }
+    if (!confirm(order.status === 'cancelled' ? 'Arquivar este pedido cancelado? Ele continuará nos relatórios.' : 'Cancelar e arquivar este pedido? Os geladinhos voltarão ao estoque e o histórico será preservado.')) return;
+    if (order.status !== 'cancelled') {
+      returnOrder(order, today(), 'Pedido cancelado e arquivado');
+      order.status = 'cancelled';
+      order.cancelledAt = today();
+    }
+    order.archived = true;
     save();
-    toast('Pedido excluído.');
+    toast('Pedido arquivado. O histórico continua nos relatórios.');
     render();
   }
   function deleteSupply(id) {
@@ -1611,12 +1773,32 @@
       toast('Não é possível excluir: o item já é usado em uma receita ou produção. Edite-o em vez disso.');
       return;
     }
+    const hasHistory = item.movements.length || data.purchases.some(entry => String(entry.supplyId) === String(id)) || data.expenses.some(entry => String(entry.supplyId) === String(id));
+    if (hasHistory) {
+      if (n(item.quantity) !== 0) {
+        toast('Para arquivar este item com histórico, primeiro corrija a quantidade para zero e informe o motivo.');
+        return;
+      }
+      item.active = false;
+      item.archivedAt = today();
+      save();
+      toast('Item arquivado. Compras e financeiro foram preservados.');
+      navigate('stock:' + (item.category === 'supply' ? 'supply' : 'ingredient'));
+      return;
+    }
     data.supplies = data.supplies.filter(entry => String(entry.id) !== String(id));
-    data.purchases = data.purchases.filter(entry => String(entry.supplyId) !== String(id));
-    data.expenses = data.expenses.filter(entry => String(entry.supplyId) !== String(id));
     save();
     toast('Cadastro excluído.');
     navigate('stock:ingredient');
+  }
+  function restoreSupply(id) {
+    const item = supplies()[id];
+    if (!item || item.active !== false) return;
+    item.active = true;
+    item.archivedAt = '';
+    save();
+    toast('Item reativado no estoque.');
+    navigate('stock:' + (item.category === 'supply' ? 'supply' : 'ingredient'));
   }
   function deleteReady(id) {
     const item = ready()[id];
@@ -1656,11 +1838,21 @@
   }
   function deleteExpense(id) {
     const expense = data.expenses.find(item => String(item.id) === String(id));
-    if (!expense || expense.category === 'purchase' || !confirm('Excluir esta conta paga?')) return;
-    data.expenses = data.expenses.filter(item => String(item.id) !== String(id));
+    if (!expense || expense.category === 'purchase' || !confirm('Anular esta conta paga? Ela sairá do resultado, mas ficará registrada no histórico.')) return;
+    expense.voided = true;
+    expense.voidedAt = today();
     state.editExpense = '';
     save();
-    toast('Conta excluída.');
+    toast('Conta anulada. O histórico financeiro foi preservado.');
+    navigate('finance:payable');
+  }
+  function restoreExpense(id) {
+    const expense = data.expenses.find(item => String(item.id) === String(id));
+    if (!expense || !expense.voided) return;
+    expense.voided = false;
+    expense.voidedAt = '';
+    save();
+    toast('Conta restaurada no financeiro.');
     navigate('finance:payable');
   }
   function deleteSupplier(id) {
@@ -1751,6 +1943,8 @@
         const remote = await window.GelatosCloud.getState();
         data = normalize(remote.state);
         cloudRevision = Number(remote.revision);
+        cloudBaseData = cloneData(data);
+        cloudDirty = false;
         saveLocal();
         toast('Dados da empresa carregados da nuvem.');
         navigate('home');
@@ -1765,6 +1959,8 @@
       cloudRevision = Number(claimed.revision);
       const saved = await window.GelatosCloud.saveState(data, cloudRevision);
       cloudRevision = Number(saved.revision);
+      cloudBaseData = cloneData(data);
+      cloudDirty = false;
       saveLocal();
       toast('Empresa ativada e dados enviados para a nuvem.');
       navigate('home');
@@ -1773,8 +1969,18 @@
   async function forceCloudRefresh() {
     try {
       const remote = await window.GelatosCloud.getState();
+      if (cloudDirty) {
+        data = reconcileCloudState(remote.state).merged;
+        cloudRevision = Number(remote.revision);
+        saveLocal();
+        render();
+        queueCloudSave();
+        toast('Alterações locais e da nuvem foram conciliadas.');
+        return;
+      }
       data = normalize(remote.state);
       cloudRevision = Number(remote.revision);
+      cloudBaseData = cloneData(data);
       saveLocal();
       render();
       toast('Dados atualizados pela nuvem.');
@@ -1875,7 +2081,7 @@
     if (action === 'close-info') { state.info = null; render(); return; }
     if (action === 'add-delivery-zone') {
       state.deliveryDraft = deliveryDraftFromForm($('#deliverySettingsForm'));
-      state.deliveryDraft.zones.push({ city: '', fee: '' });
+      state.deliveryDraft.zones.push({ city: '', fee: '', deliveryCost: '' });
       const index = state.deliveryDraft.zones.length - 1;
       render({ preserveScroll: true, focusSelector: '[data-zone-city="' + index + '"]' });
       return;
@@ -1899,6 +2105,7 @@
     if (action === 'send-order') { sendOrder(id); return; }
     if (action === 'edit-supply') { state.editSupply = id; state.screen = 'supply-edit'; render(); return; }
     if (action === 'delete-supply') { deleteSupply(id); return; }
+    if (action === 'restore-supply') { restoreSupply(id); return; }
     if (action === 'inspect-price') { state.compareSupply = id; state.comparePrice = ''; state.compareQuantity = ''; navigate('tools:compare'); return; }
     if (action === 'edit-ready') { state.editReady = id; state.screen = 'ready-edit'; render(); return; }
     if (action === 'delete-ready') { deleteReady(id); return; }
@@ -1923,6 +2130,7 @@
     if (action === 'delete-production') { deleteProduction(id); return; }
     if (action === 'edit-expense') { state.editExpense = id; state.screen = 'finance-payable'; render(); return; }
     if (action === 'delete-expense') { deleteExpense(id); return; }
+    if (action === 'restore-expense') { restoreExpense(id); return; }
     if (action === 'edit-supplier') { state.editSupplier = id; state.screen = 'supplier-edit'; render(); return; }
     if (action === 'delete-supplier') { deleteSupplier(id); return; }
     if (action === 'edit-category') { state.editProductCategory = id; state.screen = 'category-edit'; render(); return; }
@@ -2029,5 +2237,21 @@
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) refreshFromCloud(true);
   });
-  if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./service-worker.js').catch(() => {}));
+  if ('serviceWorker' in navigator) window.addEventListener('load', () => {
+    const updateButton = $('#appUpdate');
+    const showUpdate = () => { if (updateButton) updateButton.hidden = false; };
+    updateButton?.addEventListener('click', () => location.reload());
+    navigator.serviceWorker.register('./service-worker.js').then(registration => {
+      // Solicita a checagem mesmo em quem abre o atalho instalado há semanas.
+      registration.update().catch(() => {});
+      if (registration.waiting) showUpdate();
+      registration.addEventListener('updatefound', () => {
+        const worker = registration.installing;
+        worker?.addEventListener('statechange', () => {
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) showUpdate();
+        });
+      });
+      navigator.serviceWorker.addEventListener('controllerchange', showUpdate);
+    }).catch(() => {});
+  });
 })();
