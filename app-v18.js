@@ -771,7 +771,29 @@
       return leftCategory.localeCompare(rightCategory, 'pt-BR') || left.name.localeCompare(right.name, 'pt-BR');
     });
   }
-  function manualOrderOptions(selected) {
+  function scheduledLeadDays() {
+    return Math.max(2, Math.min(30, Math.round(n(data.settings.scheduledLeadDays || 2))));
+  }
+  function scheduledMinDate() {
+    const date = new Date();
+    date.setHours(12, 0, 0, 0);
+    date.setDate(date.getDate() + scheduledLeadDays());
+    return date.toISOString().slice(0, 10);
+  }
+  function orderKindForScreen() {
+    const editing = data.orders.find(order => String(order.id) === String(state.editOrder));
+    return editing ? editing.orderKind : state.orderDraft?.orderKind === 'scheduled' ? 'scheduled' : 'ready';
+  }
+  function orderDeliveryModes() {
+    return String(data.settings.deliveryModes || 'Retirada,Entrega').split(',').map(mode => mode.trim()).filter(Boolean);
+  }
+  function defaultOrderDeliveryMode() {
+    return orderDeliveryModes()[0] || 'Retirada';
+  }
+  function isDeliveryMode(value) {
+    return String(value || '').toLocaleLowerCase('pt-BR').includes('entrega');
+  }
+  function manualOrderOptions(selected, orderKind = 'ready') {
     const grouped = productCategories().map(category => ({
       category,
       products: manualOrderProducts().filter(product => categoryFor(product).id === category.id)
@@ -779,40 +801,46 @@
     const option = product => {
       const available = n(product.quantity) > 0;
       const chosen = String(product.id) === String(selected);
-      const label = product.name + ' · ' + (available ? qtyText(product.quantity) + ' un. em estoque' : 'esgotado') + ' · ' + money(product.saleUnitPrice);
-      return '<option value="' + esc(product.id) + '"' + (chosen ? ' selected' : '') + (available ? '' : ' disabled') + '>' + esc(label) + '</option>';
+      const scheduled = orderKind === 'scheduled';
+      const label = product.name + ' · ' + (scheduled ? 'encomenda' : available ? qtyText(product.quantity) + ' un. em estoque' : 'esgotado') + ' · ' + money(product.saleUnitPrice);
+      return '<option value="' + esc(product.id) + '"' + (chosen ? ' selected' : '') + (scheduled || available ? '' : ' disabled') + '>' + esc(label) + '</option>';
     };
     return '<option value="">Selecione</option>' + grouped.map(group => '<optgroup label="' + esc(group.category.name) + '">' + group.products.map(option).join('') + '</optgroup>').join('');
   }
   function orderLinesMarkup() {
-    const editingScheduled = data.orders.find(order => String(order.id) === String(state.editOrder))?.orderKind === 'scheduled';
-    const products = editingScheduled
-      ? data.recipes.filter(recipe => recipe.active !== false).map(recipe => ({ ...recipe, id: recipe.id, quantity: n(ready()[recipe.id]?.quantity), saleUnitPrice: n(recipe.saleUnitPrice) }))
-      : manualOrderProducts();
+    const scheduled = orderKindForScreen() === 'scheduled';
     return state.orderLines.map((line, index) => {
-      const choices = editingScheduled
-        ? options(products, line.productId, item => item.name + ' · encomenda · ' + money(item.saleUnitPrice))
-        : manualOrderOptions(line.productId);
+      const choices = manualOrderOptions(line.productId, scheduled ? 'scheduled' : 'ready');
       return '<div class="order-line"><select data-order-product="' + index + '">' + choices + '</select><input data-order-quantity="' + index + '" inputmode="decimal" value="' + esc(line.quantity) + '" aria-label="Quantidade"><button type="button" class="line-remove" data-action="remove-order-line" data-index="' + index + '" aria-label="Remover item">×</button></div>';
     }).join('');
   }
   function draftOrderTotal() {
+    const scheduled = orderKindForScreen() === 'scheduled';
     return round(state.orderLines.reduce((sum, line) => {
-      const product = ready()[line.productId] || recipeById()[line.productId];
+      const product = scheduled ? recipeById()[line.productId] : (ready()[line.productId] || recipeById()[line.productId]);
       return sum + (product ? n(line.quantity) * n(product.saleUnitPrice) : 0);
     }, 0));
   }
-  function rememberOrderDraft() {
-    const form = $('#orderForm');
-    if (!form) return;
+  function orderDraftFromForm(form) {
+    if (!form) return state.orderDraft || {};
     const f = form.elements;
-    state.orderDraft = {
+    return {
       customer: f.customer?.value || '',
       phone: f.phone?.value || '',
       payment: f.payment?.value || 'Pix',
       date: f.date?.value || today(),
-      dueDate: f.dueDate?.value || today()
+      dueDate: f.dueDate?.value || today(),
+      orderKind: f.orderKind?.value === 'scheduled' ? 'scheduled' : orderKindForScreen(),
+      scheduledFor: f.scheduledFor?.value || '',
+      deliveryMode: f.deliveryMode?.value || defaultOrderDeliveryMode(),
+      zoneId: f.zoneId?.value || '',
+      address: f.address?.value || ''
     };
+  }
+  function rememberOrderDraft() {
+    const form = $('#orderForm') || $('#orderEditForm');
+    if (!form) return;
+    state.orderDraft = orderDraftFromForm(form);
   }
   function orderStatus(order) {
     if (order.status === 'paid') return 'pago';
@@ -838,34 +866,90 @@
     const reservation = order.status === 'reserved' ? '<dt>Reserva até</dt><dd>' + brDateTime(order.reservationExpiresAt) + '</dd>' : order.status === 'expired' ? '<dt>Reserva expirada</dt><dd>' + brDateTime(order.expiredAt) + '</dd>' : '';
     const schedule = order.orderKind === 'scheduled' ? '<dt>Encomenda para</dt><dd>' + brDate(order.scheduledFor || order.dueDate) + '</dd><dt>Reserva de estoque</dt><dd>' + (order.stockReserved ? 'Itens prontos já reservados' : 'Aguardando produção') + '</dd>' : '';
     const checklist = order.stockReserved ? '<h4>Checklist de separação</h4><div class="pick-list">' + pick + '</div>' : '<section class="form-note"><b>Planejamento de produção:</b> produza os itens e então use “Reservar itens prontos”. Nenhum geladinho foi baixado do estoque ainda.</section>';
-    return detail(order.customer, brDate(order.date) + (order.orderKind === 'scheduled' ? ' · entrega/retirada em ' + brDate(order.scheduledFor || order.dueDate) : ' · vence ' + brDate(order.dueDate)) + ' · ' + esc(order.paymentMethod), money(order.total), orderStatus(order), '<dl><dt>WhatsApp</dt><dd>' + esc(order.phone || 'não informado') + '</dd>' + schedule + reservation + '<dt>Custo vendido</dt><dd>' + money(order.cost) + '</dd><dt>Custo de entrega</dt><dd>' + money(order.deliveryCost) + '</dd><dt>Taxa de pagamento</dt><dd>' + money(order.paymentFee) + '</dd><dt>Lucro da venda</dt><dd>' + money(order.profit) + '</dd></dl>' + checklist + '<h4>Itens</h4><ul>' + lines + '</ul><div class="details-actions">' + actions + '</div>');
+    const destination = orderDestination(order);
+    const address = String(order.address || '').trim();
+    return detail(order.customer, brDate(order.date) + (order.orderKind === 'scheduled' ? ' · entrega/retirada em ' + brDate(order.scheduledFor || order.dueDate) : ' · vence ' + brDate(order.dueDate)) + ' · ' + esc(order.paymentMethod), money(order.total), orderStatus(order), '<dl><dt>WhatsApp</dt><dd>' + esc(order.phone || 'não informado') + '</dd><dt>Recebimento</dt><dd>' + esc(order.deliveryMode || order.mode || 'Retirada') + '</dd><dt>Local</dt><dd>' + esc(destination) + '</dd>' + (address ? '<dt>Endereço / observação</dt><dd>' + esc(address).replace(/\n/g, '<br>') + '</dd>' : '') + schedule + reservation + '<dt>Frete cobrado</dt><dd>' + money(order.freight) + '</dd><dt>Custo vendido</dt><dd>' + money(order.cost) + '</dd><dt>Custo de entrega</dt><dd>' + money(order.deliveryCost) + '</dd><dt>Taxa de pagamento</dt><dd>' + money(order.paymentFee) + '</dd><dt>Lucro da venda</dt><dd>' + money(order.profit) + '</dd></dl>' + checklist + '<h4>Itens</h4><ul>' + lines + '</ul><div class="details-actions">' + actions + '</div>');
+  }
+  function orderDeliverySummary(draft, subtotal = draftOrderTotal()) {
+    const modes = orderDeliveryModes();
+    const mode = modes.includes(draft.deliveryMode) ? draft.deliveryMode : defaultOrderDeliveryMode();
+    const delivery = isDeliveryMode(mode);
+    const zones = deliveryZones(data.settings.deliveryZones);
+    const zone = zones.find(item => String(item.id) === String(draft.zoneId)) || null;
+    const quantity = state.orderLines.reduce((sum, line) => sum + Math.max(0, n(line.quantity)), 0);
+    const freeByValue = n(data.settings.freeDeliveryMinValue) > 0 && subtotal >= n(data.settings.freeDeliveryMinValue);
+    const freeByItems = n(data.settings.freeDeliveryMinItems) > 0 && quantity >= n(data.settings.freeDeliveryMinItems);
+    const free = delivery && (freeByValue || freeByItems);
+    return { mode, delivery, zone, quantity, subtotal: round(subtotal), freight: delivery && !free ? Math.max(0, n(zone?.fee)) : 0, deliveryCost: delivery ? Math.max(0, n(zone?.cost)) : 0, free, total: round(subtotal + (delivery && !free ? Math.max(0, n(zone?.fee)) : 0)) };
+  }
+  function orderTypeChooser(draft, editing = false) {
+    const scheduled = draft.orderKind === 'scheduled';
+    if (editing) return '<section class="manual-order-type static"><span>Tipo do pedido</span><b>' + (scheduled ? 'Encomenda programada' : 'Pronta entrega') + '</b><small>' + (scheduled ? 'O estoque pronto será reservado somente depois da produção.' : 'O estoque pronto é reservado ao salvar.') + '</small></section>';
+    return '<section class="manual-order-type"><span>Tipo do pedido</span><div><button type="button" class="' + (!scheduled ? 'selected' : '') + '" data-action="choose-manual-order-kind" data-kind="ready"><b>Pronta entrega</b><small>Baixa os geladinhos já produzidos.</small></button><button type="button" class="' + (scheduled ? 'selected' : '') + '" data-action="choose-manual-order-kind" data-kind="scheduled"><b>Encomenda</b><small>Programa a produção para uma data futura.</small></button></div></section>';
+  }
+  function orderFulfillmentFields(draft) {
+    const summary = orderDeliverySummary(draft);
+    const modes = orderDeliveryModes();
+    const zones = deliveryZones(data.settings.deliveryZones);
+    const select = '<select name="deliveryMode">' + modes.map(mode => '<option' + (mode === summary.mode ? ' selected' : '') + '>' + esc(mode) + '</option>').join('') + '</select>';
+    const pickup = !summary.delivery && String(data.settings.pickupAddress || '').trim() ? '<section class="form-note"><b>Retirada:</b> ' + esc(data.settings.pickupAddress).replace(/\n/g, '<br>') + '</section>' : '';
+    const location = summary.delivery ? field('Local de entrega', '<select name="zoneId" required><option value="">Selecione o local</option>' + zones.map(zone => '<option value="' + esc(zone.id) + '"' + (summary.zone?.id === zone.id ? ' selected' : '') + '>' + esc(zone.name) + ' · frete ' + money(zone.fee) + '</option>').join('') + '</select>', 'Usa as cidades e bairros cadastrados em Configurações › Frete e entrega.') : '';
+    const addressLabel = summary.delivery ? 'Endereço de entrega' : 'Observação para retirada';
+    const address = field(addressLabel, '<textarea name="address"' + (summary.delivery ? ' required' : '') + ' rows="3" placeholder="' + (summary.delivery ? 'Rua, número, bairro e ponto de referência.' : 'Ex.: horário desejado para retirar.') + '">' + esc(draft.address || '') + '</textarea>');
+    return field('Forma de receber', select) + location + address + pickup;
+  }
+  function orderTotalMarkup(draft) {
+    const summary = orderDeliverySummary(draft);
+    const freight = !summary.delivery ? 'R$ 0,00 (retirada)' : summary.free ? 'Grátis' : summary.zone ? money(summary.freight) : 'Selecione o local';
+    return '<div class="calculation-row calculation-breakdown"><span>Subtotal dos geladinhos</span><b id="orderSubtotalPreview">' + money(summary.subtotal) + '</b><span>Frete</span><b id="orderFreightPreview">' + freight + '</b><strong>Total do pedido</strong><strong id="orderPreview">' + money(summary.total) + '</strong><small>O pedido entra no faturamento e lucro somente quando for marcado como pago.</small></div>';
+  }
+  function updateOrderPreview() {
+    const form = $('#orderForm') || $('#orderEditForm');
+    if (!form) return;
+    const summary = orderDeliverySummary(orderDraftFromForm(form));
+    const subtotal = $('#orderSubtotalPreview');
+    const freight = $('#orderFreightPreview');
+    const total = $('#orderPreview');
+    if (subtotal) subtotal.textContent = money(summary.subtotal);
+    if (freight) freight.textContent = !summary.delivery ? 'R$ 0,00 (retirada)' : summary.free ? 'Grátis' : summary.zone ? money(summary.freight) : 'Selecione o local';
+    if (total) total.textContent = money(summary.total);
   }
   function ordersScreen() {
     if (state.screen === 'orders-history') {
       const cards = data.orders.filter(order => !order.archived).slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(orderCard).join('') || empty('Nenhum pedido criado ainda.');
       return '<section class="screen active">' + heading('Controle de pedidos', 'Pedidos realizados', 'Acompanhe encomendas, produção, reservas, pagamento e separação. O histórico financeiro continua preservado.') + '<div class="list">' + cards + '</div></section>';
     }
-    const draft = state.orderDraft || { customer: '', phone: '', payment: 'Pix', date: today(), dueDate: today() };
-    return '<section class="screen active">' + heading('Controle de pedidos', 'Novo pedido', 'Use o mesmo cardápio do cliente. Sabores sem estoque aparecem, mas ficam bloqueados para evitar venda além do produzido.') + '<form id="orderForm" class="panel form-panel"><h2>Dados do cliente</h2><div class="form-grid two">' +
+    const draft = { customer: '', phone: '', payment: 'Pix', date: today(), dueDate: today(), orderKind: 'ready', scheduledFor: scheduledMinDate(), deliveryMode: defaultOrderDeliveryMode(), zoneId: '', address: '', ...(state.orderDraft || {}) };
+    const scheduled = draft.orderKind === 'scheduled';
+    const dateField = scheduled
+      ? field('Data desejada para a encomenda', '<input name="scheduledFor" required type="date" min="' + scheduledMinDate() + '" value="' + esc(draft.scheduledFor || scheduledMinDate()) + '">', 'A data precisa ter pelo menos ' + scheduledLeadDays() + ' dias para o preparo.')
+      : field('Vencimento / data esperada', '<input name="dueDate" type="date" value="' + esc(draft.dueDate || today()) + '">', 'É a data usada para avisar que o pedido ainda não foi pago.');
+    const itemText = scheduled ? 'Todos os sabores ativos aparecem organizados por categoria, mesmo quando ainda não há produção pronta. A encomenda não baixa estoque agora.' : 'Todos os sabores ativos do cardápio aparecem organizados por categoria. Os esgotados ficam visíveis, mas não podem ser selecionados.';
+    return '<section class="screen active">' + heading('Controle de pedidos', 'Novo pedido', 'Registre uma venda feita por telefone, WhatsApp ou presencialmente — inclusive encomendas de clientes que não usam o link.') + '<form id="orderForm" class="panel form-panel"><input type="hidden" name="orderKind" value="' + (scheduled ? 'scheduled' : 'ready') + '"><h2>Dados do cliente</h2><div class="form-grid two">' +
       field('Nome do cliente', '<input name="customer" required value="' + esc(draft.customer) + '" placeholder="Ex.: Maria">') +
       field('WhatsApp', '<input name="phone" inputmode="tel" value="' + esc(draft.phone) + '" placeholder="Ex.: 11999999999">') +
-      '</div><div class="section-line"><div><h3>Itens do pedido</h3><p>Todos os sabores ativos do cardápio aparecem organizados por categoria. Os esgotados ficam visíveis, mas não podem ser selecionados.</p></div></div><div class="line-list">' + orderLinesMarkup() + '</div><button type="button" class="outline full" data-action="add-order-line">+ Adicionar outro geladinho</button><div class="form-grid two">' +
+      '</div>' + orderTypeChooser(draft) + '<div class="section-line"><div><h3>Itens do pedido</h3><p>' + itemText + '</p></div></div><div class="line-list">' + orderLinesMarkup() + '</div><button type="button" class="outline full" data-action="add-order-line">+ Adicionar outro geladinho</button><div class="form-grid two">' +
       field('Forma de pagamento', '<select name="payment">' + METHODS.map(method => '<option' + (draft.payment === method ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') +
-      field('Vencimento / data esperada', '<input name="dueDate" type="date" value="' + esc(draft.dueDate) + '">', 'É a data usada para avisar que o pedido ainda não foi pago.') +
+      dateField +
       field('Data do pedido', '<input name="date" type="date" value="' + esc(draft.date) + '">') +
-      '</div><div class="calculation-row"><span>Total do pedido</span><b id="orderPreview">' + money(draftOrderTotal()) + '</b><small>O pedido entra no faturamento e lucro quando for marcado como pago.</small></div><button class="primary full">Confirmar pedido e reservar estoque</button></form></section>';
+      '</div><section class="order-fulfillment"><h3>Entrega ou retirada</h3>' + orderFulfillmentFields(draft) + '</section>' + orderTotalMarkup(draft) + '<button class="primary full">' + (scheduled ? 'Programar encomenda' : 'Confirmar pedido e reservar estoque') + '</button></form></section>';
   }
   function orderEditScreen() {
     const order = data.orders.find(item => String(item.id) === String(state.editOrder));
     if (!order) return '<section class="screen active">' + empty('Pedido não encontrado.') + '</section>';
-    const draft = state.orderDraft || { customer: order.customer, phone: order.phone || '', payment: order.paymentMethod, date: order.date, dueDate: order.dueDate };
-    return '<section class="screen active">' + heading('Controle de pedidos', 'Editar pedido', 'As quantidades, o total, custo e reserva do estoque são recalculados ao salvar.') + '<form id="orderEditForm" class="panel form-panel"><input type="hidden" name="id" value="' + esc(order.id) + '"><div class="form-grid two">' +
+    const matchingZone = deliveryZones(data.settings.deliveryZones).find(zone => zone.name === String(order.deliveryZone || ''));
+    const draft = { customer: order.customer, phone: order.phone || '', payment: order.paymentMethod, date: order.date, dueDate: order.dueDate, orderKind: order.orderKind, scheduledFor: order.scheduledFor || order.dueDate, deliveryMode: order.deliveryMode || order.mode || defaultOrderDeliveryMode(), zoneId: order.zoneId || matchingZone?.id || '', address: order.address || '', ...(state.orderDraft || {}) };
+    const scheduled = order.orderKind === 'scheduled';
+    const dateField = scheduled
+      ? field('Data programada', '<input name="scheduledFor" required type="date" value="' + esc(draft.scheduledFor || order.scheduledFor || order.dueDate) + '">', 'Ao mudar a data, o sistema aplica o prazo mínimo atual e verifica a capacidade do dia.')
+      : field('Vencimento', '<input name="dueDate" type="date" value="' + esc(draft.dueDate || order.dueDate) + '">');
+    return '<section class="screen active">' + heading('Controle de pedidos', 'Editar pedido', scheduled ? 'Edite a encomenda sem baixar estoque. Ao chegar a data, marque em produção e reserve os itens prontos.' : 'As quantidades, o total, custo e reserva do estoque são recalculados ao salvar.') + '<form id="orderEditForm" class="panel form-panel"><input type="hidden" name="id" value="' + esc(order.id) + '"><input type="hidden" name="orderKind" value="' + esc(order.orderKind) + '">' + orderTypeChooser(draft, true) + '<div class="form-grid two">' +
       field('Nome do cliente', '<input name="customer" required value="' + esc(draft.customer) + '">') +
       field('WhatsApp', '<input name="phone" inputmode="tel" value="' + esc(draft.phone) + '">') +
       field('Forma de pagamento', '<select name="payment">' + METHODS.map(method => '<option' + (draft.payment === method ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') +
-      field('Vencimento', '<input name="dueDate" type="date" value="' + esc(draft.dueDate) + '">') +
+      dateField +
       field('Data do pedido', '<input name="date" type="date" value="' + esc(draft.date) + '">') +
-      '</div><div class="section-line"><div><h3>Itens</h3><p>A situação do pedido continua paga, pendente ou cancelada.</p></div></div><div class="line-list">' + orderLinesMarkup() + '</div><button type="button" class="outline full" data-action="add-order-line">+ Adicionar outro geladinho</button><div class="calculation-row"><span>Novo total</span><b id="orderPreview">' + money(draftOrderTotal()) + '</b></div><div class="button-row"><button class="primary">Salvar alterações</button><button class="outline" type="button" data-route="orders:history">Cancelar</button></div></form></section>';
+      '</div><div class="section-line"><div><h3>Itens</h3><p>' + (scheduled ? 'Você pode incluir qualquer sabor ativo; a reserva de estoque acontece depois da produção.' : 'A situação do pedido continua paga, pendente ou cancelada.') + '</p></div></div><div class="line-list">' + orderLinesMarkup() + '</div><button type="button" class="outline full" data-action="add-order-line">+ Adicionar outro geladinho</button><section class="order-fulfillment"><h3>Entrega ou retirada</h3>' + orderFulfillmentFields(draft) + '</section>' + orderTotalMarkup(draft) + '<div class="button-row"><button class="primary">Salvar alterações</button><button class="outline" type="button" data-route="orders:history">Cancelar</button></div></form></section>';
   }
   function stockScreen() {
     if (state.screen === 'stock-purchase') return purchaseScreen();
@@ -1485,7 +1569,7 @@
   }
   function catalogLink() {
     try {
-      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=40';
+      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=41';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -1551,6 +1635,7 @@
     });
   }
   function orderLines() {
+    const scheduled = orderKindForScreen() === 'scheduled';
     const grouped = {};
     state.orderLines.forEach(line => {
       if (line.productId && n(line.quantity) > 0) grouped[line.productId] = qty((grouped[line.productId] || 0) + n(line.quantity));
@@ -1558,7 +1643,7 @@
     return Object.entries(grouped).map(([productId, quantity]) => {
       const product = recipeById()[productId] || ready()[productId];
       const category = categoryFor(product);
-      return { productId, quantity, saleUnitPrice: n(ready()[productId]?.saleUnitPrice || recipeById()[productId]?.saleUnitPrice), productCategoryId: category.id, productType: category.name };
+      return { productId, quantity, saleUnitPrice: n(scheduled ? recipeById()[productId]?.saleUnitPrice : (ready()[productId]?.saleUnitPrice || recipeById()[productId]?.saleUnitPrice)), productCategoryId: category.id, productType: category.name };
     });
   }
   function estimateScheduledOrder(lines) {
@@ -1595,6 +1680,32 @@
     });
     order.stockReserved = false;
   }
+  function scheduledCapacityError(lines, scheduledFor, excludeOrderId = '') {
+    const capacity = Math.max(0, n(data.settings.scheduledMaxItemsPerDay));
+    if (!(capacity > 0)) return '';
+    const scheduled = data.orders.filter(order => order.orderKind === 'scheduled' && String(order.scheduledFor || order.dueDate) === String(scheduledFor) && !['cancelled', 'expired'].includes(order.status) && String(order.id) !== String(excludeOrderId));
+    const alreadyPlanned = scheduled.reduce((sum, order) => sum + order.items.reduce((lineSum, item) => lineSum + n(item.quantity), 0), 0);
+    const requested = lines.reduce((sum, line) => sum + n(line.quantity), 0);
+    if (alreadyPlanned + requested > capacity) return 'Esta data já tem ' + qtyText(alreadyPlanned) + ' geladinho(s) programado(s). O limite configurado é ' + qtyText(capacity) + '. Escolha outra data ou ajuste o limite em Configurações › Cardápio do cliente.';
+    return '';
+  }
+  function manualOrderMeta(form, subtotal, existing = null, lines = []) {
+    const draft = orderDraftFromForm(form);
+    const kind = existing ? existing.orderKind : draft.orderKind;
+    const schedule = kind === 'scheduled';
+    const scheduledFor = schedule ? (draft.scheduledFor || existing?.scheduledFor || existing?.dueDate || '') : '';
+    if (schedule) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(scheduledFor))) throw new Error('Informe a data desejada para a encomenda.');
+      const changingDate = !existing || String(scheduledFor) !== String(existing.scheduledFor || existing.dueDate);
+      if (changingDate && scheduledFor < scheduledMinDate()) throw new Error('Escolha uma data de encomenda a partir de ' + brDate(scheduledMinDate()) + '.');
+      const capacityError = scheduledCapacityError(lines, scheduledFor, existing?.id || '');
+      if (capacityError) throw new Error(capacityError);
+    }
+    const summary = orderDeliverySummary(draft, subtotal);
+    if (summary.delivery && !summary.zone) throw new Error('Escolha o local de entrega para calcular o frete.');
+    if (summary.delivery && String(draft.address || '').trim().length < 5) throw new Error('Informe o endereço de entrega completo.');
+    return { kind, scheduledFor, dueDate: schedule ? scheduledFor : (draft.dueDate || today()), deliveryMode: summary.mode, zoneId: summary.zone?.id || '', deliveryZone: summary.zone?.name || '', address: String(draft.address || '').trim(), freight: summary.freight, deliveryCost: summary.deliveryCost, total: summary.total };
+  }
   async function submitOrder(form, editing = false) {
     if (orderSubmitting) return;
     orderSubmitting = true;
@@ -1606,34 +1717,53 @@
       toast('Informe o cliente e pelo menos um geladinho.');
       return;
     }
+    const old = editing ? data.orders.find(order => String(order.id) === String(control(form, 'id').value)) : null;
+    if (editing && !old) { toast('Pedido não encontrado.'); return; }
     rememberOrderDraft();
     if (!await confirmLatestStock()) return;
     lines = orderLines();
     const date = f.date.value || today();
+    let meta;
+    try {
+      meta = manualOrderMeta(form, draftOrderTotal(), old, lines);
+    } catch (error) {
+      toast(error.message);
+      return;
+    }
     if (!editing) {
       try {
+        if (meta.kind === 'scheduled') {
+          const result = estimateScheduledOrder(lines);
+          const total = round(result.revenue + meta.freight);
+          const paymentFee = paymentFeeFor(total, f.payment.value);
+          data.orders.unshift({ id: uid(), customer, phone: f.phone.value.trim(), items: result.lines, subtotal: result.revenue, freight: meta.freight, total, cost: result.cost, deliveryCost: meta.deliveryCost, paymentFee, profit: round(total - result.cost - meta.deliveryCost - paymentFee), paymentMethod: f.payment.value, status: 'scheduled', orderKind: 'scheduled', stockReserved: false, date, dueDate: meta.dueDate, scheduledFor: meta.scheduledFor, deliveryMode: meta.deliveryMode, deliveryZone: meta.deliveryZone, zoneId: meta.zoneId, address: meta.address, source: 'pedido-manual', paidAt: '' });
+          state.orderLines = [{ productId: '', quantity: 1 }];
+          state.orderDraft = null;
+          addNotice('order', 'Nova encomenda manual: ' + customer, 'Programada para ' + brDate(meta.scheduledFor) + ' · total de ' + money(total) + '.', 'orders-history');
+          save();
+          toast('Encomenda programada. O estoque pronto não foi baixado; produza e reserve os itens quando estiverem prontos.');
+          navigate('orders:history');
+          return;
+        }
         const result = reserveOrder(lines, date, 'Pedido confirmado');
-        const paymentFee = paymentFeeFor(result.revenue, f.payment.value);
-        data.orders.unshift({ id: uid(), customer, phone: f.phone.value.trim(), items: result.lines.map(line => ({ ...line, picked: false })), total: result.revenue, cost: result.cost, deliveryCost: 0, paymentFee, profit: round(result.profit - paymentFee), paymentMethod: f.payment.value, status: 'confirmed', orderKind: 'ready', stockReserved: true, date, dueDate: f.dueDate.value || date, paidAt: '' });
+        const total = round(result.revenue + meta.freight);
+        const paymentFee = paymentFeeFor(total, f.payment.value);
+        data.orders.unshift({ id: uid(), customer, phone: f.phone.value.trim(), items: result.lines.map(line => ({ ...line, picked: false })), subtotal: result.revenue, freight: meta.freight, total, cost: result.cost, deliveryCost: meta.deliveryCost, paymentFee, profit: round(total - result.cost - meta.deliveryCost - paymentFee), paymentMethod: f.payment.value, status: 'confirmed', orderKind: 'ready', stockReserved: true, date, dueDate: meta.dueDate, deliveryMode: meta.deliveryMode, deliveryZone: meta.deliveryZone, zoneId: meta.zoneId, address: meta.address, source: 'pedido-manual', paidAt: '' });
         state.orderLines = [{ productId: '', quantity: 1 }];
         state.orderDraft = null;
-        addNotice('order', 'Pedido confirmado: ' + customer, 'Total de ' + money(result.revenue) + ' aguardando pagamento.', 'orders-history');
+        addNotice('order', 'Pedido confirmado: ' + customer, 'Total de ' + money(total) + ' aguardando pagamento.', 'orders-history');
         save();
         toast('Pedido confirmado e estoque reservado.');
         navigate('orders:history');
       } catch (error) { toast(error.message); }
       return;
     }
-    const old = data.orders.find(order => String(order.id) === String(control(form, 'id').value));
-    if (!old) return;
     if (old.orderKind === 'scheduled' && old.stockReserved === false) {
       try {
         const result = estimateScheduledOrder(lines);
-        const freight = Math.max(0, n(old.freight));
-        const total = round(result.revenue + freight);
+        const total = round(result.revenue + meta.freight);
         const paymentFee = paymentFeeFor(total, f.payment.value);
-        const deliveryCost = Math.max(0, n(old.deliveryCost));
-        Object.assign(old, { customer, phone: f.phone.value.trim(), items: result.lines, subtotal: result.revenue, total, cost: result.cost, deliveryCost, paymentFee, profit: round(total - result.cost - deliveryCost - paymentFee), paymentMethod: f.payment.value, date, dueDate: f.dueDate.value || date, scheduledFor: f.dueDate.value || old.scheduledFor || date });
+        Object.assign(old, { customer, phone: f.phone.value.trim(), items: result.lines, subtotal: result.revenue, freight: meta.freight, total, cost: result.cost, deliveryCost: meta.deliveryCost, paymentFee, profit: round(total - result.cost - meta.deliveryCost - paymentFee), paymentMethod: f.payment.value, date, dueDate: meta.dueDate, scheduledFor: meta.scheduledFor, deliveryMode: meta.deliveryMode, deliveryZone: meta.deliveryZone, zoneId: meta.zoneId, address: meta.address });
         state.editOrder = '';
         state.orderLines = [{ productId: '', quantity: 1 }];
         state.orderDraft = null;
@@ -1647,11 +1777,9 @@
     try {
       if (old.status !== 'cancelled') returnOrder(old, date, 'Estorno para edição');
       const result = reserveOrder(lines, date, 'Pedido editado');
-      const freight = Math.max(0, n(old.freight));
-      const total = round(result.revenue + freight);
+      const total = round(result.revenue + meta.freight);
       const paymentFee = paymentFeeFor(total, f.payment.value);
-      const deliveryCost = Math.max(0, n(old.deliveryCost));
-      Object.assign(old, { customer, phone: f.phone.value.trim(), items: result.lines.map(line => ({ ...line, picked: false })), subtotal: result.revenue, total, cost: result.cost, deliveryCost, paymentFee, profit: round(total - result.cost - deliveryCost - paymentFee), paymentMethod: f.payment.value, date, dueDate: f.dueDate.value || date, status: old.status === 'cancelled' ? 'confirmed' : old.status, stockReserved: true });
+      Object.assign(old, { customer, phone: f.phone.value.trim(), items: result.lines.map(line => ({ ...line, picked: false })), subtotal: result.revenue, freight: meta.freight, total, cost: result.cost, deliveryCost: meta.deliveryCost, paymentFee, profit: round(total - result.cost - meta.deliveryCost - paymentFee), paymentMethod: f.payment.value, date, dueDate: meta.dueDate, deliveryMode: meta.deliveryMode, deliveryZone: meta.deliveryZone, zoneId: meta.zoneId, address: meta.address, status: old.status === 'cancelled' ? 'confirmed' : old.status, stockReserved: true });
       state.editOrder = '';
       state.orderLines = [{ productId: '', quantity: 1 }];
       state.orderDraft = null;
@@ -2556,11 +2684,27 @@
       render({ preserveScroll: true });
       return;
     }
-    if (action === 'add-order-line') { rememberOrderDraft(); state.orderLines.push({ productId: '', quantity: 1 }); render(); return; }
+    if (action === 'choose-manual-order-kind') {
+      rememberOrderDraft();
+      const nextKind = actionNode.dataset.kind === 'scheduled' ? 'scheduled' : 'ready';
+      state.orderDraft = { ...(state.orderDraft || {}), orderKind: nextKind };
+      if (nextKind === 'scheduled' && (!state.orderDraft.scheduledFor || state.orderDraft.scheduledFor < scheduledMinDate())) state.orderDraft.scheduledFor = scheduledMinDate();
+      if (nextKind === 'ready') {
+        let removed = false;
+        state.orderLines.forEach(line => {
+          if (line.productId && !(n(ready()[line.productId]?.quantity) > 0)) { line.productId = ''; removed = true; }
+        });
+        if (removed) toast('Itens sem estoque foram removidos ao voltar para pronta entrega.');
+      }
+      render({ preserveScroll: true });
+      return;
+    }
+    if (action === 'add-order-line') { rememberOrderDraft(); state.orderLines.push({ productId: '', quantity: 1 }); render({ preserveScroll: true }); return; }
     if (action === 'remove-order-line') { state.orderLines.splice(n(actionNode.dataset.index), 1); if (!state.orderLines.length) state.orderLines.push({ productId: '', quantity: 1 }); render(); return; }
     if (action === 'edit-order') {
       const order = data.orders.find(item => String(item.id) === String(id));
-      if (order) { state.editOrder = id; state.orderLines = order.items.map(line => ({ productId: line.productId, quantity: line.quantity })); state.orderDraft = { customer: order.customer, phone: order.phone || '', payment: order.paymentMethod, date: order.date, dueDate: order.dueDate }; state.screen = 'order-edit'; render(); }
+      const matchingZone = deliveryZones(data.settings.deliveryZones).find(zone => zone.name === String(order?.deliveryZone || ''));
+      if (order) { state.editOrder = id; state.orderLines = order.items.map(line => ({ productId: line.productId, quantity: line.quantity })); state.orderDraft = { customer: order.customer, phone: order.phone || '', payment: order.paymentMethod, date: order.date, dueDate: order.dueDate, orderKind: order.orderKind, scheduledFor: order.scheduledFor || order.dueDate, deliveryMode: order.deliveryMode || order.mode || defaultOrderDeliveryMode(), zoneId: order.zoneId || matchingZone?.id || '', address: order.address || '' }; state.screen = 'order-edit'; render(); }
       return;
     }
     if (action === 'approve-order') { approveOrder(id); return; }
@@ -2637,12 +2781,17 @@
     const target = event.target;
     if (target.matches('[data-order-product]')) {
       state.orderLines[n(target.dataset.orderProduct)].productId = target.value;
-      $('#orderPreview') && ($('#orderPreview').textContent = money(draftOrderTotal()));
+      updateOrderPreview();
       return;
     }
     if (target.matches('[data-order-quantity]')) {
       state.orderLines[n(target.dataset.orderQuantity)].quantity = target.value;
-      $('#orderPreview') && ($('#orderPreview').textContent = money(draftOrderTotal()));
+      updateOrderPreview();
+      return;
+    }
+    if (target.closest('#orderForm, #orderEditForm') && ['deliveryMode', 'zoneId'].includes(target.name)) {
+      rememberOrderDraft();
+      render({ preserveScroll: true });
       return;
     }
     if (target.matches('[data-recipe-supply]')) {
@@ -2674,7 +2823,7 @@
     const target = event.target;
     if (target.matches('[data-order-quantity]')) {
       state.orderLines[n(target.dataset.orderQuantity)].quantity = target.value;
-      const preview = $('#orderPreview'); if (preview) preview.textContent = money(draftOrderTotal());
+      updateOrderPreview();
     }
     if (target.matches('[data-recipe-quantity]')) { state.recipeLines[n(target.dataset.recipeQuantity)].quantity = target.value; updateRecipePreview(); }
     if (target.matches('[data-recipe-unit]')) { state.recipeLines[n(target.dataset.recipeUnit)].unit = target.value; updateRecipePreview(); }
@@ -2733,7 +2882,7 @@
     const updateButton = $('#appUpdate');
     const showUpdate = () => { if (updateButton) updateButton.hidden = false; };
     updateButton?.addEventListener('click', () => location.reload());
-    navigator.serviceWorker.register('./service-worker.js?v=40').then(registration => {
+    navigator.serviceWorker.register('./service-worker.js?v=41').then(registration => {
       // Solicita a checagem mesmo em quem abre o atalho instalado há semanas.
       registration.update().catch(() => {});
       if (registration.waiting) showUpdate();

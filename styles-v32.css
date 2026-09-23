@@ -111,3 +111,69 @@
   .delivery-zone-row label:first-of-type { grid-column: 1 / -1; }
   .delivery-zone-row .line-remove { grid-column: 2; justify-self: end; }
 }
+
+/* Pedido manual: a mesma escolha simples entre pronta entrega e encomenda do cardápio. */
+.manual-order-type,
+.order-fulfillment {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff9fa;
+}
+.manual-order-type > span,
+.order-fulfillment h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 850;
+}
+.manual-order-type > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+.manual-order-type button {
+  display: grid;
+  gap: 4px;
+  min-height: 78px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+}
+.manual-order-type button b { font-size: 14px; }
+.manual-order-type button small,
+.manual-order-type.static small { color: var(--muted); font-size: 11px; line-height: 1.3; }
+.manual-order-type button.selected {
+  border-color: var(--pink);
+  background: #fff0f3;
+  box-shadow: 0 0 0 2px rgba(216, 94, 120, .12);
+}
+.manual-order-type.static { gap: 3px; }
+.manual-order-type.static b { font-size: 16px; color: var(--pink-dark); }
+.order-fulfillment .form-field { margin: 0; }
+.order-fulfillment .form-field + .form-field { margin-top: 12px; }
+.calculation-breakdown {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px 12px;
+  align-items: center;
+}
+.calculation-breakdown > strong {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 17px;
+}
+.calculation-breakdown > strong:nth-last-of-type(1) { color: var(--pink-dark); text-align: right; }
+.calculation-breakdown > small { grid-column: 1 / -1; margin-top: 3px; }
+
+@media (max-width: 390px) {
+  .manual-order-type > div { grid-template-columns: 1fr; }
+  .manual-order-type button { min-height: 62px; }
+}
