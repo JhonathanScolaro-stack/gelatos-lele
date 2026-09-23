@@ -5,16 +5,35 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#d85e78">
   <meta name="description" content="Cardápio Gelatos Lele">
-  <link rel="stylesheet" href="customer.css?v=38">
-  <link rel="stylesheet" href="customer-v31.css?v=38">
-  <link rel="stylesheet" href="customer-v32.css?v=38">
-  <link rel="stylesheet" href="customer-v36.css?v=38">
+  <link rel="stylesheet" href="customer.css?v=39">
+  <link rel="stylesheet" href="customer-v31.css?v=39">
+  <link rel="stylesheet" href="customer-v32.css?v=39">
+  <link rel="stylesheet" href="customer-v36.css?v=39">
   <title>Cardápio Gelatos Lele</title>
 </head>
 <body>
   <main id="customerApp"></main>
-  <script src="cloud-config.js?v=38"></script>
-  <script src="cloud-sync.js?v=38"></script>
-  <script src="customer.js?v=38"></script>
+  <script>
+    // O cardápio também pode ser aberto por quem não acessa a área de gestão.
+    // Registre e atualize o service worker aqui para que esses clientes nunca
+    // permaneçam presos aos arquivos de uma versão anterior do cardápio.
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('./service-worker.js?v=39').then(function (registration) {
+          registration.update();
+          navigator.serviceWorker.addEventListener('controllerchange', function () {
+            if (sessionStorage.getItem('gelatos-catalog-reloaded-v39')) return;
+            sessionStorage.setItem('gelatos-catalog-reloaded-v39', '1');
+            window.location.reload();
+          }, { once: true });
+        }).catch(function () {
+          // A página continua utilizável mesmo em navegadores sem suporte a PWA.
+        });
+      });
+    }
+  </script>
+  <script src="cloud-config.js?v=39"></script>
+  <script src="cloud-sync.js?v=39"></script>
+  <script src="customer.js?v=39"></script>
 </body>
 </html>

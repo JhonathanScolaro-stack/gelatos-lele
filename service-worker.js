@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v38-scheduled-encomendas';
+const CACHE = 'gelatos-lele-company-v39-catalog-update';
 const ASSETS = [
   './',
   './index.html',
@@ -43,7 +43,7 @@ self.addEventListener('fetch', event => {
     }).catch(() => caches.match(fallback)));
     return;
   }
-  // Os arquivos usam ?v=38 para atualização. Ignorar só essa consulta mantém
+  // Os arquivos usam ?v=39 para atualização. Ignorar só essa consulta mantém
   // o app funcional offline com o mesmo arquivo que foi pré-armazenado.
   event.respondWith(caches.match(event.request, { ignoreSearch: true }).then(cached => cached || fetch(event.request).then(response => {
     const copy = response.clone();
