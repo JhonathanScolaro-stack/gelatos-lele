@@ -119,10 +119,55 @@
     scheduledLeadDays: '2',
     scheduledMaxItemsPerDay: ''
   };
+  // O fechamento inicial registra a realidade financeira no dia em que a
+  // empresa começa a usar o app. Não representa vendas novas e, portanto,
+  // não altera faturamento, custo ou lucro operacional.
+  const defaultOpeningFinancial = () => ({
+    date: '',
+    balances: { Dinheiro: 0, Pix: 0, Crédito: 0, Débito: 0 },
+    receivableTotal: 0,
+    receivableRemaining: 0,
+    payableTotal: 0,
+    payableRemaining: 0,
+    note: '',
+    receipts: [],
+    payments: []
+  });
+  function normalizeOpeningFinancial(raw) {
+    const source = raw && typeof raw === 'object' ? raw : {};
+    const base = defaultOpeningFinancial();
+    const balances = Object.fromEntries(METHODS.map(method => [method, Math.max(0, n(source.balances?.[method]))]));
+    const records = key => Array.isArray(source[key]) ? source[key].map(item => ({
+      id: item.id || uid(),
+      total: Math.max(0, n(item.total)),
+      paymentMethod: METHODS.includes(item.paymentMethod) ? item.paymentMethod : 'Pix',
+      date: /^\d{4}-\d{2}-\d{2}$/.test(String(item.date || '')) ? item.date : today(),
+      note: String(item.note || '').trim()
+    })).filter(item => item.total > 0) : [];
+    const receipts = records('receipts');
+    const payments = records('payments');
+    const receivableTotal = Math.max(0, n(source.receivableTotal));
+    const payableTotal = Math.max(0, n(source.payableTotal));
+    const received = receipts.reduce((sum, item) => sum + n(item.total), 0);
+    const paid = payments.reduce((sum, item) => sum + n(item.total), 0);
+    return {
+      ...base,
+      ...source,
+      date: /^\d{4}-\d{2}-\d{2}$/.test(String(source.date || '')) ? source.date : '',
+      balances,
+      receivableTotal,
+      receivableRemaining: Math.max(0, Math.min(receivableTotal, Object.prototype.hasOwnProperty.call(source, 'receivableRemaining') ? n(source.receivableRemaining) : Math.max(0, receivableTotal - received))),
+      payableTotal,
+      payableRemaining: Math.max(0, Math.min(payableTotal, Object.prototype.hasOwnProperty.call(source, 'payableRemaining') ? n(source.payableRemaining) : Math.max(0, payableTotal - paid))),
+      note: String(source.note || '').trim(),
+      receipts,
+      payments
+    };
+  }
   const blankData = () => ({
     version: 18,
     supplies: [], recipes: [], productions: [], readyStock: [], orders: [], expenses: [],
-    suppliers: [], purchases: [], productCategories: defaultProductCategories(), notifications: [], notificationKeys: [], settings: { ...DEFAULT_SETTINGS }
+    suppliers: [], purchases: [], productCategories: defaultProductCategories(), notifications: [], notificationKeys: [], openingFinancial: defaultOpeningFinancial(), settings: { ...DEFAULT_SETTINGS }
   });
   function normalize(raw) {
     const old = raw && typeof raw === 'object' ? raw : {};
@@ -184,6 +229,7 @@
         stockReserved: item.orderKind === 'scheduled' ? item.stockReserved === true : item.stockReserved !== false
       })) : [],
       expenses: Array.isArray(old.expenses) ? old.expenses : [],
+      openingFinancial: normalizeOpeningFinancial(old.openingFinancial),
       suppliers: Array.isArray(old.suppliers) ? old.suppliers : [],
       purchases: Array.isArray(old.purchases) ? old.purchases : [],
       notifications: Array.isArray(old.notifications) ? old.notifications : [],
@@ -216,7 +262,7 @@
       'category-edit': 'records-categories'
     };
     const screen = fallback[String(value || '')] || String(value || '');
-    return /^(home|orders-(new|history)|stock-(purchase|ingredient|supply|ready)|recipes|production|finance-(overview|receivable|payable)|reports-(orders|finance|stock)|records-(catalog|suppliers|categories)|tools-(compare|capacity)|settings-(home|cloud|team|appearance|message|catalog|delivery|backup|restore-preview))$/.test(screen) ? screen : 'home';
+    return /^(home|orders-(new|history)|stock-(purchase|ingredient|supply|ready)|recipes|production|finance-(overview|receivable|payable|opening|opening-receive|opening-pay)|reports-(orders|finance|stock)|records-(catalog|suppliers|categories)|tools-(compare|capacity)|settings-(home|cloud|team|appearance|message|catalog|delivery|backup|restore-preview))$/.test(screen) ? screen : 'home';
   }
   function loadLastScreen() {
     try { return resumableScreen(localStorage.getItem(LAST_SCREEN_KEY)); }
@@ -508,10 +554,15 @@
     });
     data.notificationKeys = data.notificationKeys.filter(key => !key.startsWith('min-') && !key.startsWith('late-') || active.includes(key));
   }
+  const openingFinancial = () => data.openingFinancial || defaultOpeningFinancial();
+  const openingBalanceTotal = () => round(METHODS.reduce((sum, method) => sum + n(openingFinancial().balances?.[method]), 0));
   function paymentBalances() {
-    const values = Object.fromEntries(METHODS.map(method => [method, 0]));
+    const opening = openingFinancial();
+    const values = Object.fromEntries(METHODS.map(method => [method, n(opening.balances?.[method]) ]));
     data.orders.filter(order => order.status === 'paid').forEach(order => values[order.paymentMethod] = round(values[order.paymentMethod] + n(order.total) - n(order.paymentFee)));
     data.expenses.filter(expense => !expense.voided).forEach(expense => values[expense.paymentMethod] = round(values[expense.paymentMethod] - n(expense.total)));
+    opening.receipts.forEach(item => values[item.paymentMethod] = round(values[item.paymentMethod] + n(item.total)));
+    opening.payments.forEach(item => values[item.paymentMethod] = round(values[item.paymentMethod] - n(item.total)));
     return values;
   }
   function finance(orders = data.orders.filter(order => order.status === 'paid'), expenses = data.expenses.filter(expense => expense.category !== 'purchase')) {
@@ -642,7 +693,7 @@
     return '<div class="app-shell"><header class="topbar"><button class="icon-button" data-action="open-menu" aria-label="Abrir menu">☰</button><img class="brand" src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="bell-button" data-action="open-notices" aria-label="Notificações">🔔' + (unread ? '<b>' + unread + '</b>' : '') + '</button><button id="installCta" class="install-cta" hidden>Instalar</button></header><div class="drawer-shade" data-action="close-menu"></div><aside class="drawer"><div class="drawer-brand"><img src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="icon-button" data-action="close-menu" aria-label="Fechar menu">×</button></div><nav><button class="nav-home" data-route="home">Tela inicial</button>' +
       navGroup('Controle de pedidos', 'orders', [['Novo pedido', 'orders:new'], ['Pedidos realizados', 'orders:history']]) +
       navGroup('Controle de estoque', 'stock', [['Cadastrar compra', 'stock:purchase'], ['Estoque produzido', 'stock:ready'], ['Estoque de insumos', 'stock:supply'], ['Estoque de ingredientes', 'stock:ingredient'], ['Produções', 'production'], ['Nova receita', 'recipes']]) +
-      navGroup('Financeiro', 'finance', [['Visão financeira', 'finance:overview'], ['Contas a receber', 'finance:receivable'], ['Contas pagas', 'finance:payable']]) +
+      navGroup('Financeiro', 'finance', [['Visão financeira', 'finance:overview'], ['Contas a receber', 'finance:receivable'], ['Contas pagas', 'finance:payable'], ['Fechamento inicial', 'finance:opening']]) +
       navGroup('Relatórios', 'reports', [['Pedidos', 'reports:orders'], ['Financeiro', 'reports:finance'], ['Estoque', 'reports:stock']]) +
       navGroup('Cadastros', 'records', [['Cardápio / sabores', 'records:catalog'], ['Categorias de geladinho', 'records:categories'], ['Ingredientes', 'stock:ingredient'], ['Insumos', 'stock:supply'], ['Fornecedores', 'records:suppliers']]) +
       navGroup('Ferramentas', 'tools', [['Preços e compras', 'tools:compare'], ['Produção possível', 'tools:capacity']]) +
@@ -705,12 +756,45 @@
     if (state.screen.startsWith('settings-')) return settingsScreen();
     return homeScreen();
   }
+  function manualOrderProducts() {
+    return data.recipes.filter(recipe => recipe.active !== false).map(recipe => {
+      const produced = ready()[recipe.id];
+      return {
+        ...recipe,
+        id: recipe.id,
+        quantity: n(produced?.quantity),
+        saleUnitPrice: n(produced?.saleUnitPrice || recipe.saleUnitPrice)
+      };
+    }).sort((left, right) => {
+      const leftCategory = categoryFor(left).name;
+      const rightCategory = categoryFor(right).name;
+      return leftCategory.localeCompare(rightCategory, 'pt-BR') || left.name.localeCompare(right.name, 'pt-BR');
+    });
+  }
+  function manualOrderOptions(selected) {
+    const grouped = productCategories().map(category => ({
+      category,
+      products: manualOrderProducts().filter(product => categoryFor(product).id === category.id)
+    })).filter(group => group.products.length);
+    const option = product => {
+      const available = n(product.quantity) > 0;
+      const chosen = String(product.id) === String(selected);
+      const label = product.name + ' · ' + (available ? qtyText(product.quantity) + ' un. em estoque' : 'esgotado') + ' · ' + money(product.saleUnitPrice);
+      return '<option value="' + esc(product.id) + '"' + (chosen ? ' selected' : '') + (available ? '' : ' disabled') + '>' + esc(label) + '</option>';
+    };
+    return '<option value="">Selecione</option>' + grouped.map(group => '<optgroup label="' + esc(group.category.name) + '">' + group.products.map(option).join('') + '</optgroup>').join('');
+  }
   function orderLinesMarkup() {
     const editingScheduled = data.orders.find(order => String(order.id) === String(state.editOrder))?.orderKind === 'scheduled';
     const products = editingScheduled
       ? data.recipes.filter(recipe => recipe.active !== false).map(recipe => ({ ...recipe, id: recipe.id, quantity: n(ready()[recipe.id]?.quantity), saleUnitPrice: n(recipe.saleUnitPrice) }))
-      : data.readyStock.filter(item => n(item.quantity) > 0).map(item => ({ ...item, id: item.recipeId }));
-    return state.orderLines.map((line, index) => '<div class="order-line"><select data-order-product="' + index + '">' + options(products, line.productId, item => item.name + (editingScheduled ? ' · encomenda' : ' · ' + qtyText(item.quantity) + ' un.') + ' · ' + money(item.saleUnitPrice)) + '</select><input data-order-quantity="' + index + '" inputmode="decimal" value="' + esc(line.quantity) + '" aria-label="Quantidade"><button type="button" class="line-remove" data-action="remove-order-line" data-index="' + index + '" aria-label="Remover item">×</button></div>').join('');
+      : manualOrderProducts();
+    return state.orderLines.map((line, index) => {
+      const choices = editingScheduled
+        ? options(products, line.productId, item => item.name + ' · encomenda · ' + money(item.saleUnitPrice))
+        : manualOrderOptions(line.productId);
+      return '<div class="order-line"><select data-order-product="' + index + '">' + choices + '</select><input data-order-quantity="' + index + '" inputmode="decimal" value="' + esc(line.quantity) + '" aria-label="Quantidade"><button type="button" class="line-remove" data-action="remove-order-line" data-index="' + index + '" aria-label="Remover item">×</button></div>';
+    }).join('');
   }
   function draftOrderTotal() {
     return round(state.orderLines.reduce((sum, line) => {
@@ -762,10 +846,10 @@
       return '<section class="screen active">' + heading('Controle de pedidos', 'Pedidos realizados', 'Acompanhe encomendas, produção, reservas, pagamento e separação. O histórico financeiro continua preservado.') + '<div class="list">' + cards + '</div></section>';
     }
     const draft = state.orderDraft || { customer: '', phone: '', payment: 'Pix', date: today(), dueDate: today() };
-    return '<section class="screen active">' + heading('Controle de pedidos', 'Novo pedido', 'Selecione os geladinhos prontos. O total é atualizado antes de confirmar.') + '<form id="orderForm" class="panel form-panel"><h2>Dados do cliente</h2><div class="form-grid two">' +
+    return '<section class="screen active">' + heading('Controle de pedidos', 'Novo pedido', 'Use o mesmo cardápio do cliente. Sabores sem estoque aparecem, mas ficam bloqueados para evitar venda além do produzido.') + '<form id="orderForm" class="panel form-panel"><h2>Dados do cliente</h2><div class="form-grid two">' +
       field('Nome do cliente', '<input name="customer" required value="' + esc(draft.customer) + '" placeholder="Ex.: Maria">') +
       field('WhatsApp', '<input name="phone" inputmode="tel" value="' + esc(draft.phone) + '" placeholder="Ex.: 11999999999">') +
-      '</div><div class="section-line"><div><h3>Itens do pedido</h3><p>Escolha somente itens disponíveis no estoque produzido.</p></div></div><div class="line-list">' + orderLinesMarkup() + '</div><button type="button" class="outline full" data-action="add-order-line">+ Adicionar outro geladinho</button><div class="form-grid two">' +
+      '</div><div class="section-line"><div><h3>Itens do pedido</h3><p>Todos os sabores ativos do cardápio aparecem organizados por categoria. Os esgotados ficam visíveis, mas não podem ser selecionados.</p></div></div><div class="line-list">' + orderLinesMarkup() + '</div><button type="button" class="outline full" data-action="add-order-line">+ Adicionar outro geladinho</button><div class="form-grid two">' +
       field('Forma de pagamento', '<select name="payment">' + METHODS.map(method => '<option' + (draft.payment === method ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') +
       field('Vencimento / data esperada', '<input name="dueDate" type="date" value="' + esc(draft.dueDate) + '">', 'É a data usada para avisar que o pedido ainda não foi pago.') +
       field('Data do pedido', '<input name="date" type="date" value="' + esc(draft.date) + '">') +
@@ -966,25 +1050,66 @@
       field('Data', '<input name="date" type="date" value="' + esc(expense?.date || today()) + '">') +
       '</div><div class="button-row"><button class="' + (edit ? 'primary' : 'secondary') + '">' + (edit ? 'Salvar alterações' : 'Registrar conta paga') + '</button>' + (edit ? '<button class="outline" type="button" data-route="finance:payable">Cancelar</button><button class="outline danger-button" type="button" data-action="delete-expense" data-id="' + esc(expense.id) + '">Excluir</button>' : '') + '</div></form>';
   }
+  function openingFinancialSummary() {
+    const opening = openingFinancial();
+    const configured = Boolean(opening.date || openingBalanceTotal() || n(opening.receivableTotal) || n(opening.payableTotal));
+    if (!configured) return '<section class="panel"><h2>Fechamento inicial</h2><p class="form-note">Ainda não registrado. Use este fechamento para trazer o dinheiro e os valores pendentes que já existiam antes do app, sem cadastrar centenas de pedidos antigos.</p><button class="secondary" data-route="finance:opening">Registrar fechamento inicial</button></section>';
+    return '<section class="panel"><div class="section-line"><div><h2>Fechamento inicial</h2><p>Base financeira de ' + brDate(opening.date) + '. Não entra no faturamento nem no lucro do app.</p></div><button class="outline" data-route="finance:opening">Editar</button></div><dl><dt>Saldo trazido para o app</dt><dd>' + money(openingBalanceTotal()) + '</dd><dt>Contas antigas a receber</dt><dd>' + money(opening.receivableRemaining) + '</dd><dt>Contas antigas a pagar</dt><dd>' + money(opening.payableRemaining) + '</dd></dl></section>';
+  }
+  function openingFinancialScreen() {
+    const opening = openingFinancial();
+    const received = round(opening.receipts.reduce((sum, item) => sum + n(item.total), 0));
+    const paid = round(opening.payments.reduce((sum, item) => sum + n(item.total), 0));
+    return '<section class="screen active">' + heading('Financeiro', 'Fechamento inicial', 'Traga a realidade da empresa para o app sem cadastrar as vendas antigas uma por uma.') + '<section class="panel"><p class="form-note"><b>Como preencher:</b> informe o que realmente existia na data escolhida, depois de todas as vendas e gastos anteriores. Esses números compõem o caixa e a conta, mas não entram no faturamento nem no lucro operacional.</p></section><form id="openingFinancialForm" class="panel form-panel"><div class="form-grid two">' +
+      field('Data de início do controle', '<input name="date" required type="date" value="' + esc(opening.date || today()) + '">', 'É o dia a partir do qual as vendas e despesas passam a formar os relatórios do app.') +
+      field('Dinheiro no caixa (R$)', '<input name="cash" inputmode="decimal" value="' + esc(String(n(opening.balances.Dinheiro)).replace('.', ',')) + '" placeholder="Ex.: 250,00">', 'Valor físico contado no caixa nessa data.') +
+      field('Pix / saldo em conta (R$)', '<input name="pix" inputmode="decimal" value="' + esc(String(n(opening.balances.Pix)).replace('.', ',')) + '" placeholder="Ex.: 980,50">', 'Saldo disponível na conta da empresa.') +
+      field('Crédito a receber (R$)', '<input name="credit" inputmode="decimal" value="' + esc(String(n(opening.balances.Crédito)).replace('.', ',')) + '" placeholder="Ex.: 120,00">', 'Vendas de cartão de crédito já feitas, mas ainda não depositadas.') +
+      field('Débito a receber (R$)', '<input name="debit" inputmode="decimal" value="' + esc(String(n(opening.balances.Débito)).replace('.', ',')) + '" placeholder="Ex.: 80,00">', 'Vendas de débito já feitas, mas ainda não depositadas.') +
+      field('Contas antigas a receber (R$)', '<input name="receivable" inputmode="decimal" value="' + esc(String(n(opening.receivableTotal)).replace('.', ',')) + '" placeholder="Ex.: 70,00">', 'Fiado, encomenda ou valor de cliente anterior ao app. Não conta como venda nova.') +
+      field('Contas antigas a pagar (R$)', '<input name="payable" inputmode="decimal" value="' + esc(String(n(opening.payableTotal)).replace('.', ',')) + '" placeholder="Ex.: 55,00">', 'Dívida já existente com fornecedor ou outra conta antes do app.') +
+      '</div><label class="form-field"><span>Observação</span><textarea name="note" rows="3" placeholder="Ex.: fechamento conferido com dinheiro físico e extrato bancário.">' + esc(opening.note) + '</textarea></label><section class="form-note"><b>Histórico já quitado:</b> ' + money(received) + ' de contas antigas recebidas e ' + money(paid) + ' de contas antigas pagas desde o fechamento.</section><div class="button-row"><button class="primary">Salvar fechamento inicial</button><button class="outline" type="button" data-route="finance:overview">Cancelar</button></div></form></section>';
+  }
+  function openingSettlementScreen(kind) {
+    const opening = openingFinancial();
+    const receiving = kind === 'receive';
+    const remaining = receiving ? n(opening.receivableRemaining) : n(opening.payableRemaining);
+    const title = receiving ? 'Receber conta antiga' : 'Pagar conta antiga';
+    const description = receiving ? 'Registre a entrada de um valor que já existia antes do app. Isso aumenta o saldo por forma de pagamento, mas não vira faturamento novo.' : 'Registre o pagamento de uma dívida que já existia antes do app. Isso reduz o saldo por forma de pagamento, mas não vira despesa nova.';
+    const back = receiving ? 'finance:receivable' : 'finance:payable';
+    if (!(remaining > 0)) return '<section class="screen active">' + heading('Financeiro', title, 'Não há saldo antigo pendente para registrar.') + '<button class="outline" data-route="' + back + '">Voltar</button></section>';
+    return '<section class="screen active">' + heading('Financeiro', title, description) + '<form id="openingSettlementForm" class="panel form-panel"><input type="hidden" name="kind" value="' + (receiving ? 'receive' : 'pay') + '"><div class="form-grid two">' +
+      field('Valor (R$)', '<input name="total" required inputmode="decimal" placeholder="Até ' + esc(String(remaining).replace('.', ',')) + '">', 'Restante do saldo antigo: ' + money(remaining) + '.') +
+      field(receiving ? 'Recebido por' : 'Pago com', '<select name="payment">' + METHODS.map(method => '<option' + (method === 'Pix' ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') +
+      field('Data', '<input name="date" type="date" value="' + today() + '">') +
+      '</div><label class="form-field"><span>Observação</span><input name="note" placeholder="Ex.: recebido da cliente Maria"></label><div class="button-row"><button class="primary">' + (receiving ? 'Registrar recebimento' : 'Registrar pagamento') + '</button><button class="outline" type="button" data-route="' + back + '">Cancelar</button></div></form></section>';
+  }
   function financeScreen() {
     const view = state.screen.replace('finance-', '');
     const summary = finance();
     const balances = paymentBalances();
+    if (view === 'opening') return openingFinancialScreen();
+    if (view === 'opening-receive') return openingSettlementScreen('receive');
+    if (view === 'opening-pay') return openingSettlementScreen('pay');
     if (state.editExpense) {
       const item = data.expenses.find(expense => String(expense.id) === String(state.editExpense));
       return '<section class="screen active">' + heading('Financeiro', 'Editar conta paga', 'Altere todos os dados de uma vez.') + (item ? expenseForm(item) : empty('Conta não encontrada.')) + '</section>';
     }
     if (view === 'receivable') {
-      const cards = data.orders.filter(order => order.status === 'confirmed').sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate))).map(order => detail(order.customer, 'Vence em ' + brDate(order.dueDate) + ' · ' + esc(order.paymentMethod), money(order.total), 'pendente', '<div class="details-actions"><button class="primary" data-action="mark-paid" data-id="' + esc(order.id) + '">Marcar como pago</button><button class="outline" data-action="edit-order" data-id="' + esc(order.id) + '">Abrir pedido</button></div>')).join('') || empty('Nenhum pedido aguardando pagamento.');
-      return '<section class="screen active">' + heading('Financeiro', 'Contas a receber', 'Pedidos confirmados que só entram no faturamento depois do pagamento.') + '<div class="list">' + cards + '</div></section>';
+      const opening = openingFinancial();
+      const openingCard = n(opening.receivableRemaining) > 0 ? detail('Saldo anterior ao app', 'Fechamento de ' + brDate(opening.date) + ' · não é faturamento novo', money(opening.receivableRemaining), 'pendente', '<p class="form-note">Valor existente antes do início do controle.</p><div class="details-actions"><button class="primary" data-route="finance:opening-receive">Registrar recebimento</button><button class="outline" data-route="finance:opening">Ver fechamento</button></div>') : '';
+      const orders = data.orders.filter(order => order.status === 'confirmed').sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate))).map(order => detail(order.customer, 'Vence em ' + brDate(order.dueDate) + ' · ' + esc(order.paymentMethod), money(order.total), 'pendente', '<div class="details-actions"><button class="primary" data-action="mark-paid" data-id="' + esc(order.id) + '">Marcar como pago</button><button class="outline" data-action="edit-order" data-id="' + esc(order.id) + '">Abrir pedido</button></div>')).join('');
+      return '<section class="screen active">' + heading('Financeiro', 'Contas a receber', 'Pedidos confirmados que só entram no faturamento depois do pagamento.') + '<div class="list">' + (openingCard || '') + (orders || empty('Nenhum pedido aguardando pagamento.')) + '</div></section>';
     }
     if (view === 'payable') {
+      const opening = openingFinancial();
+      const openingCard = n(opening.payableRemaining) > 0 ? detail('Saldo anterior ao app', 'Fechamento de ' + brDate(opening.date) + ' · não é despesa nova', money(opening.payableRemaining), 'pendente', '<p class="form-note">Dívida existente antes do início do controle.</p><div class="details-actions"><button class="primary" data-route="finance:opening-pay">Registrar pagamento</button><button class="outline" data-route="finance:opening">Ver fechamento</button></div>') : '';
       const cards = data.expenses.filter(item => !item.voided).slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(item => {
         const action = item.category === 'purchase' ? '<p class="form-note">Esta compra é corrigida pelo item de estoque.</p>' : '<div class="details-actions"><button class="outline" data-action="edit-expense" data-id="' + esc(item.id) + '">Editar</button><button class="outline danger-button" data-action="delete-expense" data-id="' + esc(item.id) + '">Anular</button></div>';
         return detail(item.name, brDate(item.date) + ' · ' + esc(item.paymentMethod), '− ' + money(item.total), item.category === 'purchase' ? 'compra' : 'paga', '<dl><dt>Data</dt><dd>' + brDate(item.date) + '</dd><dt>Pago com</dt><dd>' + esc(item.paymentMethod) + '</dd></dl>' + action);
       }).join('') || empty('Nenhuma conta paga registrada.');
       const voided = data.expenses.filter(item => item.voided).map(item => '<li><b>' + esc(item.name) + '</b><span>Anulada; permanece no histórico</span><button class="outline" data-action="restore-expense" data-id="' + esc(item.id) + '">Restaurar</button></li>').join('');
-      return '<section class="screen active">' + heading('Financeiro', 'Contas pagas', 'Registre despesas operacionais. As compras de estoque entram automaticamente.') + expenseForm() + '<div class="list">' + cards + '</div>' + (voided ? '<details class="panel archived-list"><summary>Contas anuladas</summary><ul>' + voided + '</ul></details>' : '') + '</section>';
+      return '<section class="screen active">' + heading('Financeiro', 'Contas pagas', 'Registre despesas operacionais. As compras de estoque entram automaticamente.') + expenseForm() + '<div class="list">' + (openingCard || '') + cards + '</div>' + (voided ? '<details class="panel archived-list"><summary>Contas anuladas</summary><ul>' + voided + '</ul></details>' : '') + '</section>';
     }
     return '<section class="screen active">' + heading('Financeiro', 'Visão financeira', 'Cada cartão leva para a parte correspondente.') + '<div class="dashboard-grid finance-metrics">' +
       metric('Faturamento', 'financeRevenue', 'Pedidos pagos', 'reports:finance') +
@@ -993,7 +1118,7 @@
       metric('Custo de entrega', 'financeDelivery', 'Custo configurado por local', 'reports:finance') +
       metric('Despesas operacionais', 'financeExpense', 'Contas pagas', 'finance:payable') +
       metric('Lucro real', 'financeProfit', 'Receita − custos − taxas − despesas', 'reports:finance', true) +
-      '</div><section class="panel balance-panel"><h2>Saldo por forma de pagamento</h2><div class="payment-balances"><span>Dinheiro <b>' + money(balances.Dinheiro) + '</b></span><span>Pix / conta <b>' + money(balances.Pix) + '</b></span><span>Crédito <b>' + money(balances.Crédito) + '</b></span><span>Débito <b>' + money(balances.Débito) + '</b></span></div></section><section class="panel"><p class="form-note">Resultado atual: faturamento ' + money(summary.revenue) + ' − custo vendido ' + money(summary.cost) + ' − taxas ' + money(summary.paymentFee) + ' − custo de entrega ' + money(summary.deliveryCost) + ' − despesas operacionais ' + money(summary.expense) + '.</p></section></section>';
+      '</div><section class="panel balance-panel"><h2>Saldo por forma de pagamento</h2><div class="payment-balances"><span>Dinheiro <b>' + money(balances.Dinheiro) + '</b></span><span>Pix / conta <b>' + money(balances.Pix) + '</b></span><span>Crédito <b>' + money(balances.Crédito) + '</b></span><span>Débito <b>' + money(balances.Débito) + '</b></span></div></section>' + openingFinancialSummary() + '<section class="panel"><p class="form-note">Resultado atual: faturamento ' + money(summary.revenue) + ' − custo vendido ' + money(summary.cost) + ' − taxas ' + money(summary.paymentFee) + ' − custo de entrega ' + money(summary.deliveryCost) + ' − despesas operacionais ' + money(summary.expense) + '.</p></section></section>';
   }
   function orderDestination(order) {
     const mode = String(order.deliveryMode || order.mode || '').trim();
@@ -1020,7 +1145,13 @@
       const location = orderDestination(order);
       return { date: day(order.date), name: order.customer, items: order.items.map(line => line.productName).join(', '), payment: order.paymentMethod, status: orderStatus(order), location, address: String(order.address || '').trim(), value: n(order.total), search: order.customer + ' ' + location + ' ' + String(order.address || '') + ' ' + order.items.map(line => line.productName).join(' ') };
     });
-    if (kind === 'finance') rows = data.orders.filter(order => order.status === 'paid').map(order => ({ date: day(order.paidAt || order.date), name: order.customer, type: 'Entrada', payment: order.paymentMethod, status: 'pago', value: n(order.total), cost: n(order.cost), search: order.customer + ' ' + order.items.map(line => line.productName).join(' ') })).concat(data.expenses.map(item => ({ date: day(item.date), name: item.name, type: item.voided ? 'Saída anulada' : 'Saída', payment: item.paymentMethod, status: item.voided ? 'anulada' : item.category === 'purchase' ? 'compra' : 'paga', value: item.voided ? 0 : -n(item.total), cost: 0, search: item.name })));
+    if (kind === 'finance') {
+      const opening = openingFinancial();
+      rows = data.orders.filter(order => order.status === 'paid').map(order => ({ date: day(order.paidAt || order.date), name: order.customer, type: 'Entrada', payment: order.paymentMethod, status: 'pago', value: n(order.total), cost: n(order.cost), search: order.customer + ' ' + order.items.map(line => line.productName).join(' ') }))
+        .concat(data.expenses.map(item => ({ date: day(item.date), name: item.name, type: item.voided ? 'Saída anulada' : 'Saída', payment: item.paymentMethod, status: item.voided ? 'anulada' : item.category === 'purchase' ? 'compra' : 'paga', value: item.voided ? 0 : -n(item.total), cost: 0, search: item.name })))
+        .concat(opening.receipts.map(item => ({ date: day(item.date), name: 'Recebimento de saldo anterior', type: 'Entrada anterior', payment: item.paymentMethod, status: 'saldo anterior', value: n(item.total), cost: 0, search: 'saldo anterior recebimento ' + item.note })))
+        .concat(opening.payments.map(item => ({ date: day(item.date), name: 'Pagamento de saldo anterior', type: 'Saída anterior', payment: item.paymentMethod, status: 'saldo anterior', value: -n(item.total), cost: 0, search: 'saldo anterior pagamento ' + item.note })));
+    }
     if (kind === 'stock') {
       data.supplies.forEach(item => item.movements.forEach(move => rows.push({ date: day(move.date), name: item.name, type: move.kind, quantity: n(move.quantity), unit: item.unit, payment: move.paymentMethod || '', status: '', value: n(move.total), search: item.name + ' ' + move.kind })));
       data.readyStock.forEach(item => item.movements.forEach(move => rows.push({ date: day(move.date), name: item.name, type: move.kind, quantity: n(move.quantity), unit: 'un.', payment: '', status: '', value: 0, search: item.name + ' ' + move.kind })));
@@ -1354,7 +1485,7 @@
   }
   function catalogLink() {
     try {
-      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=38';
+      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=40';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -1751,6 +1882,59 @@
     }
     save();
     navigate('finance:payable');
+  }
+  function saveOpeningFinancial(form) {
+    const f = form.elements;
+    const current = openingFinancial();
+    const received = round(current.receipts.reduce((sum, item) => sum + n(item.total), 0));
+    const paid = round(current.payments.reduce((sum, item) => sum + n(item.total), 0));
+    const receivableTotal = Math.max(0, n(f.receivable.value));
+    const payableTotal = Math.max(0, n(f.payable.value));
+    if (receivableTotal < received || payableTotal < paid) {
+      toast('O total inicial não pode ficar menor que o valor já baixado. Confira os recebimentos e pagamentos anteriores.');
+      return;
+    }
+    data.openingFinancial = normalizeOpeningFinancial({
+      ...current,
+      date: f.date.value || today(),
+      balances: {
+        Dinheiro: Math.max(0, n(f.cash.value)),
+        Pix: Math.max(0, n(f.pix.value)),
+        Crédito: Math.max(0, n(f.credit.value)),
+        Débito: Math.max(0, n(f.debit.value))
+      },
+      receivableTotal,
+      receivableRemaining: round(receivableTotal - received),
+      payableTotal,
+      payableRemaining: round(payableTotal - paid),
+      note: String(f.note.value || '').trim()
+    });
+    save();
+    toast('Fechamento inicial salvo. O saldo por forma de pagamento foi atualizado sem alterar o lucro.');
+    navigate('finance:overview');
+  }
+  function saveOpeningSettlement(form) {
+    const f = form.elements;
+    const receiving = f.kind.value === 'receive';
+    const opening = openingFinancial();
+    const remaining = receiving ? n(opening.receivableRemaining) : n(opening.payableRemaining);
+    const total = Math.max(0, n(f.total.value));
+    if (!(total > 0) || total > remaining) {
+      toast('Informe um valor maior que zero e igual ou menor que o saldo pendente.');
+      return;
+    }
+    const record = { id: uid(), total, paymentMethod: METHODS.includes(f.payment.value) ? f.payment.value : 'Pix', date: f.date.value || today(), note: String(f.note.value || '').trim() };
+    if (receiving) {
+      opening.receipts.unshift(record);
+      opening.receivableRemaining = round(remaining - total);
+    } else {
+      opening.payments.unshift(record);
+      opening.payableRemaining = round(remaining - total);
+    }
+    data.openingFinancial = normalizeOpeningFinancial(opening);
+    save();
+    toast(receiving ? 'Recebimento antigo registrado no saldo.' : 'Pagamento antigo registrado no saldo.');
+    navigate(receiving ? 'finance:receivable' : 'finance:payable');
   }
   function saveSupplier(form, editing = false) {
     const f = form.elements;
@@ -2514,6 +2698,8 @@
     else if (formId === 'productionEditForm') saveProductionEdit(form);
     else if (formId === 'expenseForm') saveExpense(form, false);
     else if (formId === 'expenseEditForm') saveExpense(form, true);
+    else if (formId === 'openingFinancialForm') saveOpeningFinancial(form);
+    else if (formId === 'openingSettlementForm') saveOpeningSettlement(form);
     else if (formId === 'supplierForm') saveSupplier(form, false);
     else if (formId === 'supplierEditForm') saveSupplier(form, true);
     else if (formId === 'categoryForm') saveCategory(form, false);
@@ -2547,7 +2733,7 @@
     const updateButton = $('#appUpdate');
     const showUpdate = () => { if (updateButton) updateButton.hidden = false; };
     updateButton?.addEventListener('click', () => location.reload());
-    navigator.serviceWorker.register('./service-worker.js?v=39').then(registration => {
+    navigator.serviceWorker.register('./service-worker.js?v=40').then(registration => {
       // Solicita a checagem mesmo em quem abre o atalho instalado há semanas.
       registration.update().catch(() => {});
       if (registration.waiting) showUpdate();
