@@ -114,7 +114,10 @@
     freeDeliveryMinItems: '',
     creditFeePercent: '',
     debitFeePercent: '',
-    reservationMinutes: '20'
+    reservationMinutes: '20',
+    scheduledEnabled: true,
+    scheduledLeadDays: '2',
+    scheduledMaxItemsPerDay: ''
   };
   const blankData = () => ({
     version: 18,
@@ -175,7 +178,10 @@
         reservationExpiresAt: item.reservationExpiresAt || '',
         approvedAt: item.approvedAt || '',
         expiredAt: item.expiredAt || '',
-        status: item.status || 'confirmed'
+        status: item.status || 'confirmed',
+        orderKind: item.orderKind === 'scheduled' ? 'scheduled' : 'ready',
+        scheduledFor: /^\d{4}-\d{2}-\d{2}$/.test(String(item.scheduledFor || '')) ? String(item.scheduledFor) : '',
+        stockReserved: item.orderKind === 'scheduled' ? item.stockReserved === true : item.stockReserved !== false
       })) : [],
       expenses: Array.isArray(old.expenses) ? old.expenses : [],
       suppliers: Array.isArray(old.suppliers) ? old.suppliers : [],
@@ -700,12 +706,15 @@
     return homeScreen();
   }
   function orderLinesMarkup() {
-    const products = data.readyStock.filter(item => n(item.quantity) > 0).map(item => ({ ...item, id: item.recipeId }));
-    return state.orderLines.map((line, index) => '<div class="order-line"><select data-order-product="' + index + '">' + options(products, line.productId, item => item.name + ' · ' + qtyText(item.quantity) + ' un. · ' + money(item.saleUnitPrice)) + '</select><input data-order-quantity="' + index + '" inputmode="decimal" value="' + esc(line.quantity) + '" aria-label="Quantidade"><button type="button" class="line-remove" data-action="remove-order-line" data-index="' + index + '" aria-label="Remover item">×</button></div>').join('');
+    const editingScheduled = data.orders.find(order => String(order.id) === String(state.editOrder))?.orderKind === 'scheduled';
+    const products = editingScheduled
+      ? data.recipes.filter(recipe => recipe.active !== false).map(recipe => ({ ...recipe, id: recipe.id, quantity: n(ready()[recipe.id]?.quantity), saleUnitPrice: n(recipe.saleUnitPrice) }))
+      : data.readyStock.filter(item => n(item.quantity) > 0).map(item => ({ ...item, id: item.recipeId }));
+    return state.orderLines.map((line, index) => '<div class="order-line"><select data-order-product="' + index + '">' + options(products, line.productId, item => item.name + (editingScheduled ? ' · encomenda' : ' · ' + qtyText(item.quantity) + ' un.') + ' · ' + money(item.saleUnitPrice)) + '</select><input data-order-quantity="' + index + '" inputmode="decimal" value="' + esc(line.quantity) + '" aria-label="Quantidade"><button type="button" class="line-remove" data-action="remove-order-line" data-index="' + index + '" aria-label="Remover item">×</button></div>').join('');
   }
   function draftOrderTotal() {
     return round(state.orderLines.reduce((sum, line) => {
-      const product = ready()[line.productId];
+      const product = ready()[line.productId] || recipeById()[line.productId];
       return sum + (product ? n(line.quantity) * n(product.saleUnitPrice) : 0);
     }, 0));
   }
@@ -726,6 +735,8 @@
     if (order.status === 'cancelled') return 'cancelado';
     if (order.status === 'expired') return 'reserva expirada';
     if (order.status === 'reserved') return 'aguardando aprovação';
+    if (order.status === 'scheduled') return 'encomenda programada';
+    if (order.status === 'production') return 'em produção';
     return 'pendente';
   }
   function orderCard(order) {
@@ -734,17 +745,21 @@
     const pick = order.items.map((item, index) => '<label><input type="checkbox" data-pick="' + esc(order.id) + ':' + index + '"' + (item.picked ? ' checked' : '') + (locked ? ' disabled' : '') + '> Separar ' + round(item.quantity) + ' × ' + esc(item.productName) + '</label>').join('');
     let actions = '<button class="outline" data-action="edit-order" data-id="' + esc(order.id) + '">Editar</button>';
     if (order.status === 'reserved') actions += '<button class="primary" data-action="approve-order" data-id="' + esc(order.id) + '">Aprovar pedido</button>';
+    if (order.status === 'scheduled') actions += '<button class="primary" data-action="start-scheduled-production" data-id="' + esc(order.id) + '">Marcar em produção</button>';
+    if (order.status === 'production') actions += '<button class="primary" data-action="reserve-scheduled-order" data-id="' + esc(order.id) + '">Reservar itens prontos</button>';
     if (order.status === 'confirmed' || order.status === 'paid') actions += '<button class="secondary" data-action="send-order" data-id="' + esc(order.id) + '">Enviar confirmação</button>';
     if (order.status === 'confirmed') actions += '<button class="primary" data-action="mark-paid" data-id="' + esc(order.id) + '">Marcar como pago</button>';
     if (!locked) actions += '<button class="outline" data-action="cancel-order" data-id="' + esc(order.id) + '">Cancelar</button>';
     actions += '<button class="outline danger-button" data-action="delete-order" data-id="' + esc(order.id) + '">Arquivar</button>';
     const reservation = order.status === 'reserved' ? '<dt>Reserva até</dt><dd>' + brDateTime(order.reservationExpiresAt) + '</dd>' : order.status === 'expired' ? '<dt>Reserva expirada</dt><dd>' + brDateTime(order.expiredAt) + '</dd>' : '';
-    return detail(order.customer, brDate(order.date) + ' · vence ' + brDate(order.dueDate) + ' · ' + esc(order.paymentMethod), money(order.total), orderStatus(order), '<dl><dt>WhatsApp</dt><dd>' + esc(order.phone || 'não informado') + '</dd>' + reservation + '<dt>Custo vendido</dt><dd>' + money(order.cost) + '</dd><dt>Custo de entrega</dt><dd>' + money(order.deliveryCost) + '</dd><dt>Taxa de pagamento</dt><dd>' + money(order.paymentFee) + '</dd><dt>Lucro da venda</dt><dd>' + money(order.profit) + '</dd></dl><h4>Checklist de separação</h4><div class="pick-list">' + pick + '</div><h4>Itens</h4><ul>' + lines + '</ul><div class="details-actions">' + actions + '</div>');
+    const schedule = order.orderKind === 'scheduled' ? '<dt>Encomenda para</dt><dd>' + brDate(order.scheduledFor || order.dueDate) + '</dd><dt>Reserva de estoque</dt><dd>' + (order.stockReserved ? 'Itens prontos já reservados' : 'Aguardando produção') + '</dd>' : '';
+    const checklist = order.stockReserved ? '<h4>Checklist de separação</h4><div class="pick-list">' + pick + '</div>' : '<section class="form-note"><b>Planejamento de produção:</b> produza os itens e então use “Reservar itens prontos”. Nenhum geladinho foi baixado do estoque ainda.</section>';
+    return detail(order.customer, brDate(order.date) + (order.orderKind === 'scheduled' ? ' · entrega/retirada em ' + brDate(order.scheduledFor || order.dueDate) : ' · vence ' + brDate(order.dueDate)) + ' · ' + esc(order.paymentMethod), money(order.total), orderStatus(order), '<dl><dt>WhatsApp</dt><dd>' + esc(order.phone || 'não informado') + '</dd>' + schedule + reservation + '<dt>Custo vendido</dt><dd>' + money(order.cost) + '</dd><dt>Custo de entrega</dt><dd>' + money(order.deliveryCost) + '</dd><dt>Taxa de pagamento</dt><dd>' + money(order.paymentFee) + '</dd><dt>Lucro da venda</dt><dd>' + money(order.profit) + '</dd></dl>' + checklist + '<h4>Itens</h4><ul>' + lines + '</ul><div class="details-actions">' + actions + '</div>');
   }
   function ordersScreen() {
     if (state.screen === 'orders-history') {
       const cards = data.orders.filter(order => !order.archived).slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(orderCard).join('') || empty('Nenhum pedido criado ainda.');
-      return '<section class="screen active">' + heading('Controle de pedidos', 'Pedidos realizados', 'Abra um pedido para separar, editar, confirmar pagamento, cancelar ou arquivar. O histórico financeiro continua preservado.') + '<div class="list">' + cards + '</div></section>';
+      return '<section class="screen active">' + heading('Controle de pedidos', 'Pedidos realizados', 'Acompanhe encomendas, produção, reservas, pagamento e separação. O histórico financeiro continua preservado.') + '<div class="list">' + cards + '</div></section>';
     }
     const draft = state.orderDraft || { customer: '', phone: '', payment: 'Pix', date: today(), dueDate: today() };
     return '<section class="screen active">' + heading('Controle de pedidos', 'Novo pedido', 'Selecione os geladinhos prontos. O total é atualizado antes de confirmar.') + '<form id="orderForm" class="panel form-panel"><h2>Dados do cliente</h2><div class="form-grid two">' +
@@ -1047,7 +1062,7 @@
       field('Valor máximo', '<input data-filter="max" inputmode="decimal" value="' + esc(f.max) + '">') +
       field('Pagamento', '<select data-filter="payment"><option value="">Todos</option>' + METHODS.map(method => '<option' + (f.payment === method ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') +
       (kind === 'orders' ? field('Entrega / retirada', '<select data-filter="location"><option value="">Todos os locais</option>' + Array.from(new Set(data.orders.map(orderDestination))).sort((a, b) => a.localeCompare(b, 'pt-BR')).map(location => '<option value="' + esc(location) + '"' + (f.location === location ? ' selected' : '') + '>' + esc(location) + '</option>').join('') + '</select>') : '') +
-      field('Situação', '<select data-filter="status"><option value="">Todas</option><option value="aguardando aprovação"' + (f.status === 'aguardando aprovação' ? ' selected' : '') + '>Aguardando aprovação</option><option value="pendente"' + (f.status === 'pendente' ? ' selected' : '') + '>Pendente</option><option value="pago"' + (f.status === 'pago' ? ' selected' : '') + '>Pago</option><option value="cancelado"' + (f.status === 'cancelado' ? ' selected' : '') + '>Cancelado</option><option value="reserva expirada"' + (f.status === 'reserva expirada' ? ' selected' : '') + '>Reserva expirada</option></select>') +
+      field('Situação', '<select data-filter="status"><option value="">Todas</option><option value="encomenda programada"' + (f.status === 'encomenda programada' ? ' selected' : '') + '>Encomenda programada</option><option value="em produção"' + (f.status === 'em produção' ? ' selected' : '') + '>Em produção</option><option value="aguardando aprovação"' + (f.status === 'aguardando aprovação' ? ' selected' : '') + '>Aguardando aprovação</option><option value="pendente"' + (f.status === 'pendente' ? ' selected' : '') + '>Pendente</option><option value="pago"' + (f.status === 'pago' ? ' selected' : '') + '>Pago</option><option value="cancelado"' + (f.status === 'cancelado' ? ' selected' : '') + '>Cancelado</option><option value="reserva expirada"' + (f.status === 'reserva expirada' ? ' selected' : '') + '>Reserva expirada</option></select>') +
       field('Buscar', '<input class="filter-search" data-filter="query" value="' + esc(f.query) + '" placeholder="Cliente, local, sabor, fornecedor...">') +
       '<button class="outline" type="button" data-action="clear-filter">Limpar</button><button class="secondary" type="button" data-action="export-xlsx">Baixar Excel</button></div><div class="panel report-summary">' + totalText + '</div><div class="list">' + (rows.map(row => reportCard(row, kind)).join('') || empty('Nenhum resultado encontrado.')) + '</div></section>';
   }
@@ -1263,8 +1278,8 @@
     if (section === 'message') {
       return '<section class="screen active">' + heading('Configurações', 'Mensagem e Pix', 'Personalize a confirmação enviada depois que um pedido é criado.') + '<form id="messageForm" class="panel form-panel">' +
         field('Chave Pix', '<input name="pixKey" value="' + esc(data.settings.pixKey) + '" placeholder="Telefone, e-mail ou chave aleatória">', 'Será incluída no final da mensagem de confirmação.') +
-        field('Mensagem do WhatsApp', '<textarea name="whatsappTemplate" rows="9">' + esc(data.settings.whatsappTemplate) + '</textarea>', 'Campos que você pode usar: {nome}, {itens}, {total} e {pix}. Em pedido de um sabor, {itens} mostra somente quantidade e sabor; em pedidos com mais sabores, mostra também o total de cada linha.') +
-        '<section class="message-fields"><h2>Campos disponíveis</h2><button type="button" data-action="info" data-info-title="Campo {nome}" data-info-text="Nome do cliente informado no pedido.">{nome}</button><button type="button" data-action="info" data-info-title="Campo {itens}" data-info-text="Lista dos sabores e quantidades. Em pedido com mais de um sabor, inclui o total de cada linha.">{itens}</button><button type="button" data-action="info" data-info-title="Campo {total}" data-info-text="Valor total de todo o pedido.">{total}</button><button type="button" data-action="info" data-info-title="Campo {pix}" data-info-text="Chave Pix cadastrada nesta tela.">{pix}</button></section><button class="primary full">Salvar mensagem</button></form></section>';
+        field('Mensagem do WhatsApp', '<textarea name="whatsappTemplate" rows="9">' + esc(data.settings.whatsappTemplate) + '</textarea>', 'Campos que você pode usar: {nome}, {itens}, {total}, {pix} e {data_entrega}. Em pedido de um sabor, {itens} mostra somente quantidade e sabor; em pedidos com mais sabores, mostra também o total de cada linha.') +
+        '<section class="message-fields"><h2>Campos disponíveis</h2><button type="button" data-action="info" data-info-title="Campo {nome}" data-info-text="Nome do cliente informado no pedido.">{nome}</button><button type="button" data-action="info" data-info-title="Campo {itens}" data-info-text="Lista dos sabores e quantidades. Em pedido com mais de um sabor, inclui o total de cada linha.">{itens}</button><button type="button" data-action="info" data-info-title="Campo {total}" data-info-text="Valor total de todo o pedido.">{total}</button><button type="button" data-action="info" data-info-title="Campo {pix}" data-info-text="Chave Pix cadastrada nesta tela.">{pix}</button><button type="button" data-action="info" data-info-title="Campo {data_entrega}" data-info-text="Na encomenda, mostra a data combinada. Nos demais pedidos, mostra a data do pedido.">{data_entrega}</button></section><button class="primary full">Salvar mensagem</button></form></section>';
     }
     if (section === 'catalog') {
       const link = catalogLink();
@@ -1274,7 +1289,8 @@
         field('Texto de apresentação', '<textarea name="catalogIntro" rows="3">' + esc(data.settings.catalogIntro || '') + '</textarea>', 'O cliente lê este texto ao abrir o cardápio.') +
         field('WhatsApp da empresa', '<input name="catalogPhone" inputmode="tel" value="' + esc(data.settings.catalogPhone || '') + '">', 'É usado se o celular não tiver a opção de compartilhar disponível.') +
         field('Endereço / instruções', '<textarea name="businessAddress" rows="3">' + esc(data.settings.businessAddress || '') + '</textarea>', 'Ex.: retirada no endereço, horário ou taxa de entrega.') +
-        '<button class="primary full">Salvar informações do cardápio</button></form><section class="panel"><h2>Link para enviar ao cliente</h2><p>O link mostra todos os sabores ativos. Quando não houver produção pronta, o cliente vê o sabor como esgotado e não consegue incluí-lo no pedido.</p><div class="customer-link"><input readonly value="' + esc(link) + '"><button class="secondary" type="button" data-action="copy-catalog-link">Copiar link</button></div><p class="form-note">Com a nuvem ativada, o pedido do cliente entra diretamente nos pedidos e reserva o estoque na mesma hora.</p></section></section>';
+        '<section class="panel nested-panel"><h2>Encomendas agendadas</h2><p class="form-note">A encomenda não baixa o estoque pronto no momento do pedido. Ela fica programada para você produzir, reservar os itens e confirmar.</p><label class="catalog-switch"><input name="scheduledEnabled" type="checkbox"' + (data.settings.scheduledEnabled !== false ? ' checked' : '') + '> Permitir encomendas no cardápio</label><div class="form-grid two">' + field('Prazo mínimo (dias)', '<input name="scheduledLeadDays" inputmode="numeric" value="' + esc(data.settings.scheduledLeadDays || '2') + '" placeholder="Ex.: 2">', 'O cliente só poderá escolher datas a partir deste número de dias. O mínimo do sistema é 2 dias.') + field('Limite por data (geladinhos)', '<input name="scheduledMaxItemsPerDay" inputmode="decimal" value="' + esc(data.settings.scheduledMaxItemsPerDay || '') + '" placeholder="Deixe em branco para não limitar">', 'Evita aceitar mais encomendas do que a produção comporta em um mesmo dia. Soma todos os pedidos agendados ativos para a data.') + '</div></section>' +
+        '<button class="primary full">Salvar informações do cardápio</button></form><section class="panel"><h2>Link para enviar ao cliente</h2><p>Pronta entrega mostra somente o que já foi produzido. Encomenda mostra os sabores ativos e pede uma data com o prazo mínimo configurado.</p><div class="customer-link"><input readonly value="' + esc(link) + '"><button class="secondary" type="button" data-action="copy-catalog-link">Copiar link</button></div><p class="form-note">Com a nuvem ativada, os pedidos entram diretamente no Controle de pedidos.</p></section></section>';
     }
     if (section === 'delivery') {
       const draft = state.deliveryDraft || (state.deliveryDraft = defaultDeliveryDraft());
@@ -1318,6 +1334,9 @@
       deliveryZones: deliveryZones(data.settings.deliveryZones),
       freeDeliveryMinValue: Math.max(0, n(data.settings.freeDeliveryMinValue)),
       freeDeliveryMinItems: Math.max(0, n(data.settings.freeDeliveryMinItems)),
+      scheduledEnabled: data.settings.scheduledEnabled !== false,
+      scheduledLeadDays: Math.max(2, Math.round(n(data.settings.scheduledLeadDays || 2))),
+      scheduledMaxItemsPerDay: Math.max(0, n(data.settings.scheduledMaxItemsPerDay)),
       logo: data.settings.catalogLogoDataUrl || data.settings.headerLogoDataUrl || '',
       categories: productCategories().map(category => ({ id: category.id, name: category.name })),
       products: data.recipes.filter(recipe => recipe.active !== false).map(recipe => ({
@@ -1335,7 +1354,7 @@
   }
   function catalogLink() {
     try {
-      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=37';
+      if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=38';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -1408,8 +1427,23 @@
     return Object.entries(grouped).map(([productId, quantity]) => {
       const product = recipeById()[productId] || ready()[productId];
       const category = categoryFor(product);
-      return { productId, quantity, saleUnitPrice: n(ready()[productId]?.saleUnitPrice), productCategoryId: category.id, productType: category.name };
+      return { productId, quantity, saleUnitPrice: n(ready()[productId]?.saleUnitPrice || recipeById()[productId]?.saleUnitPrice), productCategoryId: category.id, productType: category.name };
     });
+  }
+  function estimateScheduledOrder(lines) {
+    let revenue = 0, cost = 0;
+    const resultLines = lines.map(line => {
+      const recipe = recipeById()[line.productId];
+      if (!recipe || recipe.active === false || !(n(line.quantity) > 0)) throw new Error('Um sabor da encomenda não está mais disponível no cardápio.');
+      const quantity = qty(line.quantity);
+      const saleUnitPrice = n(line.saleUnitPrice || recipe.saleUnitPrice);
+      const unitCost = fullRecipeCost(recipe).unitCost;
+      const result = { ...line, productName: recipe.name, quantity, saleUnitPrice, unitCost, total: round(quantity * saleUnitPrice), cost: round(quantity * unitCost), picked: false };
+      revenue += result.total;
+      cost += result.cost;
+      return result;
+    });
+    return { lines: resultLines, revenue: round(revenue), cost: round(cost), profit: round(revenue - cost) };
   }
   function reserveOrder(lines, date, kind) {
     const result = window.GelatosCore.validateOrder(lines, ready());
@@ -1421,12 +1455,14 @@
     return result;
   }
   function returnOrder(order, date, kind) {
+    if (order.stockReserved === false) return;
     order.items.forEach(line => {
       const product = ready()[line.productId];
       if (!product) return;
       product.quantity = qty(n(product.quantity) + n(line.quantity));
       product.movements.push({ id: uid(), kind, quantity: n(line.quantity), date });
     });
+    order.stockReserved = false;
   }
   async function submitOrder(form, editing = false) {
     if (orderSubmitting) return;
@@ -1447,7 +1483,7 @@
       try {
         const result = reserveOrder(lines, date, 'Pedido confirmado');
         const paymentFee = paymentFeeFor(result.revenue, f.payment.value);
-        data.orders.unshift({ id: uid(), customer, phone: f.phone.value.trim(), items: result.lines.map(line => ({ ...line, picked: false })), total: result.revenue, cost: result.cost, deliveryCost: 0, paymentFee, profit: round(result.profit - paymentFee), paymentMethod: f.payment.value, status: 'confirmed', date, dueDate: f.dueDate.value || date, paidAt: '' });
+        data.orders.unshift({ id: uid(), customer, phone: f.phone.value.trim(), items: result.lines.map(line => ({ ...line, picked: false })), total: result.revenue, cost: result.cost, deliveryCost: 0, paymentFee, profit: round(result.profit - paymentFee), paymentMethod: f.payment.value, status: 'confirmed', orderKind: 'ready', stockReserved: true, date, dueDate: f.dueDate.value || date, paidAt: '' });
         state.orderLines = [{ productId: '', quantity: 1 }];
         state.orderDraft = null;
         addNotice('order', 'Pedido confirmado: ' + customer, 'Total de ' + money(result.revenue) + ' aguardando pagamento.', 'orders-history');
@@ -1459,6 +1495,23 @@
     }
     const old = data.orders.find(order => String(order.id) === String(control(form, 'id').value));
     if (!old) return;
+    if (old.orderKind === 'scheduled' && old.stockReserved === false) {
+      try {
+        const result = estimateScheduledOrder(lines);
+        const freight = Math.max(0, n(old.freight));
+        const total = round(result.revenue + freight);
+        const paymentFee = paymentFeeFor(total, f.payment.value);
+        const deliveryCost = Math.max(0, n(old.deliveryCost));
+        Object.assign(old, { customer, phone: f.phone.value.trim(), items: result.lines, subtotal: result.revenue, total, cost: result.cost, deliveryCost, paymentFee, profit: round(total - result.cost - deliveryCost - paymentFee), paymentMethod: f.payment.value, date, dueDate: f.dueDate.value || date, scheduledFor: f.dueDate.value || old.scheduledFor || date });
+        state.editOrder = '';
+        state.orderLines = [{ productId: '', quantity: 1 }];
+        state.orderDraft = null;
+        save();
+        toast('Encomenda atualizada. O estoque pronto continua sem baixa até a reserva.');
+        navigate('orders:history');
+      } catch (error) { toast(error.message); }
+      return;
+    }
     const snapshot = JSON.stringify(data.readyStock);
     try {
       if (old.status !== 'cancelled') returnOrder(old, date, 'Estorno para edição');
@@ -1467,7 +1520,7 @@
       const total = round(result.revenue + freight);
       const paymentFee = paymentFeeFor(total, f.payment.value);
       const deliveryCost = Math.max(0, n(old.deliveryCost));
-      Object.assign(old, { customer, phone: f.phone.value.trim(), items: result.lines.map(line => ({ ...line, picked: false })), subtotal: result.revenue, total, cost: result.cost, deliveryCost, paymentFee, profit: round(total - result.cost - deliveryCost - paymentFee), paymentMethod: f.payment.value, date, dueDate: f.dueDate.value || date, status: old.status === 'cancelled' ? 'confirmed' : old.status });
+      Object.assign(old, { customer, phone: f.phone.value.trim(), items: result.lines.map(line => ({ ...line, picked: false })), subtotal: result.revenue, total, cost: result.cost, deliveryCost, paymentFee, profit: round(total - result.cost - deliveryCost - paymentFee), paymentMethod: f.payment.value, date, dueDate: f.dueDate.value || date, status: old.status === 'cancelled' ? 'confirmed' : old.status, stockReserved: true });
       state.editOrder = '';
       state.orderLines = [{ productId: '', quantity: 1 }];
       state.orderDraft = null;
@@ -1756,12 +1809,17 @@
   }
   function saveCatalogSettings(form) {
     const f = form.elements;
+    const leadDays = Math.max(2, Math.min(30, Math.round(n(f.scheduledLeadDays.value || 2))));
+    const maxItems = Math.max(0, qty(f.scheduledMaxItemsPerDay.value));
     const write = logo => {
       Object.assign(data.settings, {
         catalogName: f.catalogName.value.trim() || 'Gelatos Lele',
         catalogIntro: f.catalogIntro.value.trim(),
         catalogPhone: f.catalogPhone.value.trim(),
         businessAddress: f.businessAddress.value.trim(),
+        scheduledEnabled: Boolean(f.scheduledEnabled.checked),
+        scheduledLeadDays: String(leadDays),
+        scheduledMaxItemsPerDay: maxItems > 0 ? String(maxItems) : '',
         catalogLogoDataUrl: logo || data.settings.catalogLogoDataUrl || ''
       });
       save();
@@ -1855,17 +1913,58 @@
     toast('Pedido aprovado. Agora você pode separar e enviar a confirmação.');
     render();
   }
+  function startScheduledProduction(id) {
+    const order = data.orders.find(item => String(item.id) === String(id));
+    if (!order || order.status !== 'scheduled') return;
+    order.status = 'production';
+    order.productionStartedAt = new Date().toISOString();
+    addNotice('order', 'Encomenda em produção: ' + order.customer, 'Produza ' + order.items.reduce((sum, item) => sum + n(item.quantity), 0) + ' geladinho(s) para ' + brDate(order.scheduledFor || order.dueDate) + '.', 'production');
+    save();
+    toast('Encomenda marcada como em produção. O estoque pronto ainda não foi baixado.');
+    render();
+  }
+  async function reserveScheduledOrder(id) {
+    if (!await confirmLatestStock()) return;
+    const order = data.orders.find(item => String(item.id) === String(id));
+    if (!order || order.status !== 'production' || order.stockReserved) return;
+    const snapshot = JSON.stringify(data.readyStock);
+    try {
+      const lines = order.items.map(item => ({ productId: item.productId, quantity: item.quantity, saleUnitPrice: item.saleUnitPrice }));
+      const result = reserveOrder(lines, today(), 'Reserva para encomenda');
+      const total = round(result.revenue + Math.max(0, n(order.freight)));
+      const paymentFee = paymentFeeFor(total, order.paymentMethod);
+      Object.assign(order, {
+        items: result.lines.map((line, index) => ({ ...line, picked: Boolean(order.items[index]?.picked) })),
+        subtotal: result.revenue,
+        total,
+        cost: result.cost,
+        paymentFee,
+        profit: round(total - result.cost - n(order.deliveryCost) - paymentFee),
+        stockReserved: true,
+        status: 'confirmed',
+        stockReservedAt: new Date().toISOString()
+      });
+      addNotice('order', 'Encomenda pronta para separar: ' + order.customer, 'Estoque reservado para ' + brDate(order.scheduledFor || order.dueDate) + '.', 'orders-history');
+      save();
+      toast('Itens prontos reservados. Agora você pode separar, confirmar e receber o pagamento.');
+      render();
+    } catch (error) {
+      data.readyStock = JSON.parse(snapshot);
+      toast(error.message || 'Não foi possível reservar os itens produzidos.');
+    }
+  }
   function cancelOrder(id) {
     const order = data.orders.find(item => String(item.id) === String(id));
+    const returnsStock = order?.stockReserved !== false;
     const question = order?.status === 'paid'
-      ? 'Este pedido já foi marcado como pago. Confirme somente depois de devolver ou combinar o valor com o cliente. Cancelar devolverá os geladinhos e retirará a venda do faturamento.'
-      : 'Cancelar este pedido e devolver os geladinhos ao estoque?';
+      ? 'Este pedido já foi marcado como pago. Confirme somente depois de devolver ou combinar o valor com o cliente. Cancelar' + (returnsStock ? ' devolverá os geladinhos ao estoque' : ' não movimentará estoque, pois a encomenda ainda não foi reservada') + ' e retirará a venda do faturamento.'
+      : returnsStock ? 'Cancelar este pedido e devolver os geladinhos ao estoque?' : 'Cancelar esta encomenda? Nenhum geladinho será devolvido porque o estoque ainda não foi reservado.';
     if (!order || order.status === 'cancelled' || !confirm(question)) return;
     returnOrder(order, today(), 'Pedido cancelado');
     order.status = 'cancelled';
     order.cancelledAt = today();
     save();
-    toast('Pedido cancelado e estoque devolvido.');
+    toast(returnsStock ? 'Pedido cancelado e estoque devolvido.' : 'Encomenda cancelada sem movimentar o estoque pronto.');
     render();
   }
   function deleteOrder(id) {
@@ -2012,7 +2111,8 @@
       .replace(/\{nome\}/g, order.customer)
       .replace(/\{itens\}/g, lines)
       .replace(/\{total\}/g, money(order.total))
-      .replace(/\{pix\}/g, data.settings.pixKey || 'A combinar');
+      .replace(/\{pix\}/g, data.settings.pixKey || 'A combinar')
+      .replace(/\{data_entrega\}/g, brDate(order.scheduledFor || order.dueDate || order.date));
     if (navigator.share) {
       navigator.share({ title: 'Pedido Gelatos Lele', text }).catch(() => {});
       return;
@@ -2280,6 +2380,8 @@
       return;
     }
     if (action === 'approve-order') { approveOrder(id); return; }
+    if (action === 'start-scheduled-production') { startScheduledProduction(id); return; }
+    if (action === 'reserve-scheduled-order') { reserveScheduledOrder(id); return; }
     if (action === 'mark-paid') { markPaid(id); return; }
     if (action === 'cancel-order') { cancelOrder(id); return; }
     if (action === 'delete-order') { deleteOrder(id); return; }

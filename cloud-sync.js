@@ -89,6 +89,8 @@
       p_zone_id: order.zoneId,
       p_address: order.address,
       p_payment: order.payment,
+      p_order_kind: order.orderKind || 'ready',
+      p_scheduled_for: order.scheduledFor || null,
       p_items: order.items
     }, false);
   }
