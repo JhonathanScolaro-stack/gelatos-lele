@@ -173,6 +173,13 @@
 .calculation-breakdown > strong:nth-last-of-type(1) { color: var(--pink-dark); text-align: right; }
 .calculation-breakdown > small { grid-column: 1 / -1; margin-top: 3px; }
 
+/* Encomendas podem ter uma parte já guardada e outra ainda em produção. */
+.allocation { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.allocation b { color: var(--ink); }
+.compact-list { display: grid; gap: 8px; margin: 12px 0; padding: 0; list-style: none; }
+.compact-list li { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff9fa; }
+.compact-list li span { color: var(--muted); font-size: 12px; line-height: 1.35; }
+
 @media (max-width: 390px) {
   .manual-order-type > div { grid-template-columns: 1fr; }
   .manual-order-type button { min-height: 62px; }

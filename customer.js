@@ -28,7 +28,7 @@
     const type = productType(value);
     return type === 'Água' ? 'agua' : type === 'Leite' ? 'leite' : 'gourmet';
   };
-  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=41';
+  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=42';
   const ORDER_ATTEMPT_KEY = 'gelatos-lele-customer-order-attempt-v1';
   const CUSTOMER_CLIENT_KEY = 'gelatos-lele-customer-client-v1';
   const newAttemptId = () => (window.crypto?.randomUUID?.() || (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2)));
@@ -121,9 +121,17 @@
       products: catalog.products.filter(product => categoryForProduct(product).id === category.id).sort((a, b) => String(a.name).localeCompare(String(b.name), 'pt-BR'))
     })).filter(group => group.products.length);
   }
-  function applyConfirmedStock() {
-    if (isScheduled()) return;
-    selectedProducts().forEach(product => { product.available = Math.max(0, num(product.available) - num(quantities[product.id])); });
+  function applyConfirmedStock(saved) {
+    // A resposta do servidor é a fonte da verdade. Em encomendas, somente a
+    // parte que já estava pronta é retirada agora; o restante fica pendente de
+    // produção e não pode reduzir o estoque duas vezes.
+    const reservedByProduct = Object.fromEntries((saved?.items || []).map(item => [String(item.productId), num(item.reservedQuantity ?? (saved?.orderKind === 'scheduled' ? 0 : item.quantity))]));
+    selectedProducts().forEach(product => {
+      const reserved = Object.prototype.hasOwnProperty.call(reservedByProduct, String(product.id))
+        ? reservedByProduct[String(product.id)]
+        : (isScheduled() ? 0 : num(quantities[product.id]));
+      product.available = Math.max(0, num(product.available) - reserved);
+    });
   }
   function isDelivery() { return String(draft.mode || '').toLocaleLowerCase('pt-BR').includes('entrega'); }
   function syncDraft(form) {
@@ -202,7 +210,7 @@
   function reviewForm(result) {
     const deliveryText = result.delivery ? (result.zone?.name || 'Local não informado') : 'Retirada';
     const addressText = result.delivery ? draft.address : (catalog.pickupAddress || draft.address || 'A combinar');
-    const orderDescription = isScheduled() ? 'Ao enviar, sua encomenda entra na programação de produção da Gelatos Lele. A confirmação será enviada pelo WhatsApp.' : 'Ao enviar, o estoque será reservado por um tempo limitado até a Gelatos Lele aprovar o pedido.';
+    const orderDescription = isScheduled() ? 'Ao enviar, o que já estiver pronto será separado para você; somente os sabores restantes entram na programação de produção. A confirmação será enviada pelo WhatsApp.' : 'Ao enviar, o estoque será reservado por um tempo limitado até a Gelatos Lele aprovar o pedido.';
     const scheduling = isScheduled() ? '<dt>Encomenda para</dt><dd>' + esc(scheduledDateText(draft.scheduledFor)) + '</dd>' : '';
     return '<form id="customerOrder" class="panel checkout checkout-review"><h2>Confira seu pedido</h2><p class="small">' + orderDescription + '</p>' + cartLines(result) + '<dl class="review-details"><dt>Cliente</dt><dd>' + esc(draft.customer) + '</dd><dt>WhatsApp</dt><dd>' + esc(draft.phone) + '</dd>' + scheduling + '<dt>Recebimento</dt><dd>' + esc(draft.mode) + '</dd><dt>Local</dt><dd>' + esc(deliveryText) + '</dd><dt>Endereço</dt><dd>' + esc(addressText).replace(/\n/g, '<br>') + '</dd><dt>Pagamento</dt><dd>' + esc(draft.payment) + '</dd></dl>' + totalsMarkup(result) + '<div class="checkout-actions"><button type="button" class="outline" data-action="edit-checkout">Editar pedido</button><button class="primary">Enviar pedido</button></div></form>';
   }
@@ -223,7 +231,10 @@
     const scheduled = result.orderKind === 'scheduled';
     const reservation = result.reservationExpiresAt ? '<p>Sua reserva fica ativa até ' + esc(new Date(result.reservationExpiresAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })) + '.</p>' : '';
     const schedule = scheduled ? '<p><b>Encomenda para ' + esc(scheduledDateText(result.scheduledFor)) + '.</b></p>' : '';
-    root.innerHTML = '<section class="hero">' + managementBack() + '<h1>Pedido recebido</h1><p>' + (scheduled ? 'Recebemos sua encomenda e ela já entrou na programação da Gelatos Lele.' : 'Recebemos seu pedido e reservamos os geladinhos selecionados temporariamente.') + '</p></section><section class="panel confirmation"><h2>Total: ' + money.format(num(result.total)) + '</h2><p>Pedido nº ' + esc(result.orderId) + '. A Gelatos Lele confirmará os próximos passos pelo WhatsApp informado.</p>' + schedule + reservation + freight + '<button class="primary" id="newOrder">Fazer outro pedido</button></section>';
+    const reserved = (result.items || []).reduce((sum, item) => sum + num(item.reservedQuantity ?? (scheduled ? 0 : item.quantity)), 0);
+    const pending = (result.items || []).reduce((sum, item) => sum + num(item.pendingProductionQuantity ?? (scheduled ? item.quantity : 0)), 0);
+    const allocation = scheduled ? '<p><b>' + reserved + ' geladinho(s) já foram separados.</b>' + (pending > 0 ? '<br>' + pending + ' geladinho(s) ficaram programados para produção.' : '') + '</p>' : '';
+    root.innerHTML = '<section class="hero">' + managementBack() + '<h1>Pedido recebido</h1><p>' + (scheduled ? 'Recebemos sua encomenda e já separamos automaticamente tudo o que estava pronto.' : 'Recebemos seu pedido e reservamos os geladinhos selecionados temporariamente.') + '</p></section><section class="panel confirmation"><h2>Total: ' + money.format(num(result.total)) + '</h2><p>Pedido nº ' + esc(result.orderId) + '. A Gelatos Lele confirmará os próximos passos pelo WhatsApp informado.</p>' + schedule + allocation + reservation + freight + '<button class="primary" id="newOrder">Fazer outro pedido</button></section>';
     document.getElementById('newOrder')?.addEventListener('click', () => {
       orderAttemptId = '';
       sessionStorage.removeItem(ORDER_ATTEMPT_KEY);
@@ -250,7 +261,7 @@
     if (button) { button.disabled = true; button.textContent = 'Confirmando pedido…'; }
     try {
       const saved = await window.GelatosCloud.placeCustomerOrder({ requestId: orderAttemptId, clientId: customerClientId(), customer: draft.customer.trim(), phone: draft.phone.trim(), mode: draft.mode, zoneId: draft.zoneId, address: draft.address.trim(), payment: draft.payment, orderKind: draft.orderKind, scheduledFor: isScheduled() ? draft.scheduledFor : '', items: result.selected.map(product => ({ productId: product.id, quantity: quantities[product.id] })) });
-      applyConfirmedStock();
+      applyConfirmedStock(saved);
       confirmation(saved);
     } catch (error) {
       if (button) { button.disabled = false; button.textContent = 'Confirmar pedido'; }
