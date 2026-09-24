@@ -82,26 +82,36 @@
     reader.onerror = () => reject(new Error('Não foi possível ler a imagem.'));
     reader.readAsDataURL(file);
   });
+  const optimizeImageDataUrl = (source, { maxSide, mime, quality }) => new Promise(resolve => {
+    if (!String(source || '').startsWith('data:image/')) { resolve(source); return; }
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const scale = Math.min(1, maxSide / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
+        canvas.height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
+        const context = canvas.getContext('2d');
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const encoded = canvas.toDataURL(mime, quality);
+        resolve(encoded.startsWith('data:image/') ? encoded : source);
+      } catch (_) { resolve(source); }
+    };
+    image.onerror = () => resolve(source);
+    image.src = source;
+  });
   const optimizeProductImage = async file => {
     const source = await readFileDataUrl(file);
-    return new Promise(resolve => {
-      const image = new Image();
-      image.onload = () => {
-        try {
-          const maxSide = 960;
-          const scale = Math.min(1, maxSide / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
-          const canvas = document.createElement('canvas');
-          canvas.width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
-          canvas.height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
-          const context = canvas.getContext('2d');
-          context.drawImage(image, 0, 0, canvas.width, canvas.height);
-          resolve(canvas.toDataURL('image/jpeg', 0.82));
-        } catch (_) { resolve(source); }
-      };
-      image.onerror = () => resolve(source);
-      image.src = source;
-    });
+    return optimizeImageDataUrl(source, { maxSide: 512, mime: 'image/jpeg', quality: 0.7 });
   };
+  const optimizeBrandImage = async file => {
+    const source = await readFileDataUrl(file);
+    // WebP preserva transparência de logos e costuma pesar bem menos que um
+    // PNG grande. Navegadores atuais de Android exibem normalmente esse tipo.
+    return optimizeImageDataUrl(source, { maxSide: 640, mime: 'image/webp', quality: 0.82 });
+  };
+  const optimizeCatalogImageData = source => optimizeImageDataUrl(source, { maxSide: 512, mime: 'image/jpeg', quality: 0.7 });
+  const optimizeBrandImageData = source => optimizeImageDataUrl(source, { maxSide: 640, mime: 'image/webp', quality: 0.82 });
 
   const DEFAULT_SETTINGS = {
     pixKey: '',
@@ -1893,7 +1903,7 @@
         field('WhatsApp da empresa', '<input name="catalogPhone" inputmode="tel" value="' + esc(data.settings.catalogPhone || '') + '">', 'É usado se o celular não tiver a opção de compartilhar disponível.') +
         field('Endereço / instruções', '<textarea name="businessAddress" rows="3">' + esc(data.settings.businessAddress || '') + '</textarea>', 'Ex.: retirada no endereço, horário ou taxa de entrega.') +
         '<section class="panel nested-panel"><h2>Encomendas agendadas</h2><p class="form-note">Ao receber uma encomenda, o sistema separa imediatamente os sabores que já existem no estoque. Só o saldo que falta entra na produção pendente.</p><label class="catalog-switch"><input name="scheduledEnabled" type="checkbox"' + (data.settings.scheduledEnabled !== false ? ' checked' : '') + '> Permitir encomendas no cardápio</label><div class="form-grid two">' + field('Prazo mínimo (dias)', '<input name="scheduledLeadDays" inputmode="numeric" value="' + esc(data.settings.scheduledLeadDays || '2') + '" placeholder="Ex.: 2">', 'O cliente só poderá escolher datas a partir deste número de dias. O mínimo do sistema é 2 dias.') + field('Limite por data (geladinhos)', '<input name="scheduledMaxItemsPerDay" inputmode="decimal" value="' + esc(data.settings.scheduledMaxItemsPerDay || '') + '" placeholder="Deixe em branco para não limitar">', 'Evita aceitar mais encomendas do que a produção comporta em um mesmo dia. Conta apenas o que ainda precisa ser produzido para a data.') + '</div></section>' +
-        '<button class="primary full">Salvar informações do cardápio</button></form><section class="panel"><h2>Link para enviar ao cliente</h2><p>Pronta entrega mostra somente o que já foi produzido. Encomenda mostra os sabores ativos, pede uma data com o prazo mínimo e já separa o estoque que estiver pronto.</p><div class="customer-link"><input readonly value="' + esc(link) + '"><button class="secondary" type="button" data-action="copy-catalog-link">Copiar link</button></div><div class="button-row"><button class="outline" type="button" data-action="open-catalog-management">Abrir para conferir</button></div><p class="form-note">Use “Abrir para conferir” no celular de gestão: o botão “Voltar à gestão” aparecerá somente nessa abertura. O link copiado continua sendo a versão limpa para o cliente.</p><p class="form-note">Com a nuvem ativada, os pedidos entram diretamente no Controle de pedidos.</p></section></section>';
+        '<button class="primary full">Salvar informações do cardápio</button></form><section class="panel"><h2>Imagens leves para o cardápio</h2><p>Fotos e logos grandes aumentam o tráfego da nuvem. Esta ação diminui as imagens já cadastradas, sem mexer em estoque, pedidos ou valores.</p><button class="secondary full" type="button" data-action="optimize-catalog-images">Otimizar fotos e logos atuais</button></section><section class="panel"><h2>Link para enviar ao cliente</h2><p>Pronta entrega mostra somente o que já foi produzido. Encomenda mostra os sabores ativos, pede uma data com o prazo mínimo e já separa o estoque que estiver pronto.</p><div class="customer-link"><input readonly value="' + esc(link) + '"><button class="secondary" type="button" data-action="copy-catalog-link">Copiar link</button></div><div class="button-row"><button class="outline" type="button" data-action="open-catalog-management">Abrir para conferir</button></div><p class="form-note">Use “Abrir para conferir” no celular de gestão: o botão “Voltar à gestão” aparecerá somente nessa abertura. O link copiado continua sendo a versão limpa para o cliente.</p><p class="form-note">Com a nuvem ativada, os pedidos entram diretamente no Controle de pedidos.</p></section></section>';
     }
     if (section === 'delivery') {
       const draft = state.deliveryDraft || (state.deliveryDraft = defaultDeliveryDraft());
@@ -1957,7 +1967,7 @@
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=45';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=46';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -1966,7 +1976,7 @@
   }
   function managementCatalogLink() {
     const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    return base + 'customer.html?v=45&gestao=1';
+    return base + 'customer.html?v=46&gestao=1';
   }
   function noticesPanel() {
     if (!state.notices) return '';
@@ -2709,7 +2719,7 @@
     };
     const logo = f.catalogLogo?.files?.[0];
     if (!logo) { write(''); return; }
-    readFileDataUrl(logo).then(write).catch(error => toast(error.message || 'Não foi possível ler a logo.'));
+    optimizeBrandImage(logo).then(write).catch(error => toast(error.message || 'Não foi possível ler a logo.'));
   }
   function saveDeliverySettings(form) {
     const draft = deliveryDraftFromForm(form);
@@ -2742,6 +2752,26 @@
     toast('Frete e opções de entrega atualizados.');
     navigate('settings:delivery');
   }
+  async function optimizeCatalogImages() {
+    const candidates = [
+      ...data.recipes.map(recipe => ({ owner: recipe, key: 'imageData', optimize: optimizeCatalogImageData })),
+      ...['homeLogoDataUrl', 'headerLogoDataUrl', 'catalogLogoDataUrl'].map(key => ({ owner: data.settings, key, optimize: optimizeBrandImageData }))
+    ].filter(item => String(item.owner?.[item.key] || '').startsWith('data:image/'));
+    if (!candidates.length) { toast('Não há imagens cadastradas para otimizar.'); return; }
+    toast('Otimizando imagens neste celular…');
+    const optimized = await Promise.all(candidates.map(async item => ({ item, value: await item.optimize(item.owner[item.key]) })));
+    let changed = 0;
+    optimized.forEach(({ item, value }) => {
+      const current = String(item.owner[item.key] || '');
+      // Só trocamos quando existe economia real, para preservar a melhor
+      // imagem possível em arquivos que já estavam reduzidos.
+      if (value && value.length < current.length * 0.98) { item.owner[item.key] = value; changed += 1; }
+    });
+    if (!changed) { toast('As imagens atuais já estão leves.'); return; }
+    save();
+    toast(changed + (changed === 1 ? ' imagem foi otimizada.' : ' imagens foram otimizadas.'));
+    render();
+  }
   function saveAppearance(form) {
     const f = form.elements;
     const files = [{ file: f.homeLogo.files[0], key: 'homeLogoDataUrl' }, { file: f.headerLogo.files[0], key: 'headerLogoDataUrl' }].filter(item => item.file);
@@ -2749,20 +2779,12 @@
       toast('Escolha ao menos uma imagem para trocar a logo.');
       return;
     }
-    let pending = files.length;
-    files.forEach(item => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        data.settings[item.key] = reader.result;
-        pending -= 1;
-        if (!pending) {
-          save();
-          toast('Logo atualizada.');
-          navigate('settings:appearance');
-        }
-      };
-      reader.readAsDataURL(item.file);
-    });
+    Promise.all(files.map(async item => ({ key: item.key, value: await optimizeBrandImage(item.file) }))).then(items => {
+      items.forEach(item => { data.settings[item.key] = item.value; });
+      save();
+      toast('Logo atualizada.');
+      navigate('settings:appearance');
+    }).catch(error => toast(error.message || 'Não foi possível ler a logo.'));
   }
   function markPaid(id) {
     const order = data.orders.find(item => String(item.id) === String(id));
@@ -3370,6 +3392,7 @@
     if (action === 'delete-category') { deleteCategory(id); return; }
     if (action === 'clear-filter') { state.reportFilter = { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '' }; render(); return; }
     if (action === 'export-xlsx') { exportXlsx(); return; }
+    if (action === 'optimize-catalog-images') { optimizeCatalogImages(); return; }
     if (action === 'copy-catalog-link') { copyCatalogLink(); return; }
     if (action === 'open-catalog-management') { location.href = managementCatalogLink(); return; }
     if (action === 'cloud-refresh') { forceCloudRefresh(); return; }
@@ -3542,7 +3565,7 @@
     const updateButton = $('#appUpdate');
     const showUpdate = () => { if (updateButton) updateButton.hidden = false; };
     updateButton?.addEventListener('click', () => location.reload());
-    navigator.serviceWorker.register('./service-worker.js?v=45').then(registration => {
+    navigator.serviceWorker.register('./service-worker.js?v=46').then(registration => {
       // Solicita a checagem mesmo em quem abre o atalho instalado há semanas.
       registration.update().catch(() => {});
       if (registration.waiting) showUpdate();

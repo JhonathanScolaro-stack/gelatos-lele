@@ -28,10 +28,13 @@
     const type = productType(value);
     return type === 'Água' ? 'agua' : type === 'Leite' ? 'leite' : 'gourmet';
   };
-  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=45';
+  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=46';
   const openedFromManagement = () => new URLSearchParams(location.search).get('gestao') === '1';
   const ORDER_ATTEMPT_KEY = 'gelatos-lele-customer-order-attempt-v1';
   const CUSTOMER_CLIENT_KEY = 'gelatos-lele-customer-client-v1';
+  const PUBLIC_IMAGE_CACHE_PREFIX = 'gelatos-lele-public-image-v1:';
+  const CATALOG_LOGO_ID = '__catalog_logo__';
+  const DEFAULT_CATALOG_LOGO = 'logo-transparente-v2.png';
   const newAttemptId = () => (window.crypto?.randomUUID?.() || (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2)));
   const customerClientId = () => {
     let value = localStorage.getItem(CUSTOMER_CLIENT_KEY);
@@ -52,6 +55,8 @@
   let reviewing = false;
   let draft = { customer: '', phone: '', mode: 'Retirada', zoneId: '', address: '', payment: 'Pix', orderKind: 'ready', scheduledFor: '' };
   let orderAttemptId = '';
+  let publicImages = Object.create(null);
+  let pendingPublicImages = new Set();
 
   function legacyCatalog() {
     try {
@@ -60,6 +65,63 @@
       const parsed = JSON.parse(decodeURIComponent(escape(atob(fragment))));
       return Array.isArray(parsed?.products) ? parsed : null;
     } catch (_) { return null; }
+  }
+  function imageMeta(id) {
+    if (!catalog) return null;
+    if (id === CATALOG_LOGO_ID) return {
+      id,
+      source: String(catalog.logo || '').trim(),
+      token: String(catalog.logoToken || '').trim(),
+      exists: Boolean(catalog.hasLogo || catalog.logo)
+    };
+    const product = catalog.products.find(item => String(item.id) === String(id));
+    if (!product) return null;
+    return {
+      id: String(product.id),
+      source: String(product.image || '').trim(),
+      token: String(product.imageToken || '').trim(),
+      exists: Boolean(product.hasImage || product.image)
+    };
+  }
+  function imageCacheKey(id, token) {
+    return token ? PUBLIC_IMAGE_CACHE_PREFIX + String(catalog?.store || 'gelatos-lele') + ':' + id + ':' + token : '';
+  }
+  function readCachedImage(id, token) {
+    const key = imageCacheKey(id, token);
+    if (!key) return '';
+    try { return String(localStorage.getItem(key) || ''); } catch (_) { return ''; }
+  }
+  function writeCachedImage(id, token, source) {
+    const key = imageCacheKey(id, token);
+    if (!key || !source) return;
+    try { localStorage.setItem(key, source); } catch (_) { /* O catálogo continua funcionando se o navegador estiver sem espaço. */ }
+  }
+  function imageSource(id) {
+    const meta = imageMeta(id);
+    if (!meta) return '';
+    return meta.source || String(publicImages[meta.id] || '') || readCachedImage(meta.id, meta.token);
+  }
+  function loadCatalogImages(ids) {
+    if (!catalog || !window.GelatosCloud?.getCatalogImages) return;
+    const missing = [...new Set((ids || []).map(value => String(value || '')).filter(id => {
+      const meta = imageMeta(id);
+      return meta?.exists && !imageSource(id) && !pendingPublicImages.has(id);
+    }))];
+    if (!missing.length) return;
+    missing.forEach(id => pendingPublicImages.add(id));
+    const activeCatalog = catalog;
+    window.GelatosCloud.getCatalogImages(missing).then(result => {
+      if (catalog !== activeCatalog) return;
+      Object.entries(result?.images || {}).forEach(([id, source]) => {
+        const meta = imageMeta(id);
+        if (!meta || !source) return;
+        publicImages[meta.id] = String(source);
+        writeCachedImage(meta.id, meta.token, String(source));
+      });
+      render();
+    }).catch(() => {
+      // Foto indisponível nunca impede o cliente de consultar estoque ou pedir.
+    }).finally(() => missing.forEach(id => pendingPublicImages.delete(id)));
   }
   function start(nextCatalog, preserveDraft = false) {
     const previousQuantities = quantities;
@@ -80,7 +142,12 @@
     selectedProductId = '';
     openCategoryId = '';
     reviewing = false;
+    publicImages = Object.create(null);
+    pendingPublicImages = new Set();
     render();
+    // A logo é leve e é buscada separadamente; estoque e preço nunca ficam em
+    // cache. Fotos de sabores só são solicitadas ao abrir sua categoria.
+    loadCatalogImages([CATALOG_LOGO_ID]);
   }
   function availableModes() { return String(catalog?.deliveryModes || 'Retirada,Entrega').split(',').map(mode => mode.trim()).filter(Boolean); }
   function scheduledEnabled() { return catalog?.scheduledEnabled !== false; }
@@ -187,7 +254,7 @@
     const maximum = scheduled ? 99 : available;
     const category = categoryForProduct(product);
     return '<article class="product ' + (soldOut ? 'sold-out' : '') + '"><button class="product-open" type="button" data-action="choose-product" data-product="' + esc(product.id) + '" aria-expanded="' + opened + '">' +
-      (product.image ? '<img src="' + esc(product.image) + '" alt="' + esc(product.name) + '">' : '<div class="image-placeholder" aria-hidden="true"></div>') +
+      (imageSource(product.id) ? '<img src="' + esc(imageSource(product.id)) + '" alt="' + esc(product.name) + '">' : '<div class="image-placeholder" aria-hidden="true"></div>') +
       '<span class="product-copy"><span class="product-title"><b>' + esc(product.name) + '</b>' + (chosen ? '<em>' + chosen + ' no pedido</em>' : '') + '</span><span class="product-type category-' + esc(categorySlug(category.id)) + '">' + esc(category.name) + '</span><span class="product-description">' + esc(product.description || 'Geladinho artesanal.') + '</span><span class="price">' + money.format(num(product.price)) + '</span><span class="availability ' + (soldOut ? 'unavailable' : '') + '">' + (scheduled ? 'Disponível por encomenda' : soldOut ? 'Esgotado no momento' : available + ' disponível(is)') + '</span></span><span class="product-arrow" aria-hidden="true">›</span></button>' +
       (opened ? '<section class="product-picker"><b>' + (soldOut ? 'Este sabor está esgotado.' : 'Quantos você quer?') + '</b>' + (soldOut ? '<span>Acompanhe o cardápio; ele volta a ficar disponível assim que houver produção.</span>' : '<div class="quantity"><button type="button" data-change="' + esc(product.id) + ':-1" aria-label="Diminuir ' + esc(product.name) + '"' + (chosen ? '' : ' disabled') + '>−</button><strong>' + chosen + '</strong><button type="button" data-change="' + esc(product.id) + ':1" aria-label="Aumentar ' + esc(product.name) + '"' + (chosen >= maximum ? ' disabled' : '') + '>+</button><small>' + (scheduled ? 'A Gelatos Lele confirmará a disponibilidade para a data escolhida.' : 'Máximo disponível: ' + available) + '</small></div>') + '</section>' : '') +
       '</article>';
@@ -227,7 +294,7 @@
     const modes = availableModes();
     const groups = catalogGroups();
     const products = groups.length ? groups.map(categoryCard).join('') : '<p class="empty">Nenhum sabor foi cadastrado no cardápio ainda.</p>';
-    const logo = String(catalog.logo || 'logo-transparente-v2.png').trim();
+    const logo = imageSource(CATALOG_LOGO_ID) || DEFAULT_CATALOG_LOGO;
     root.innerHTML = '<section class="hero">' + managementBack() + '<img class="catalog-logo" src="' + esc(logo) + '" alt="' + esc(catalog.brand || 'Gelatos Lele') + '"><h1 class="catalog-brand-name">' + esc(catalog.brand || 'Gelatos Lele') + '</h1><p>' + esc(catalog.intro || 'Confira os sabores disponíveis.') + '</p></section>' +
       (catalog.address ? '<section class="notice"><b>Informações:</b><br>' + esc(catalog.address).replace(/\n/g, '<br>') + '</section>' : '') +
       fulfillmentChooser() + '<section class="products"><div class="catalog-heading"><div><h2>' + (isScheduled() ? 'Cardápio para encomenda' : 'Cardápio pronta entrega') + '</h2><span>' + (isScheduled() ? 'Escolha sabores para a data desejada. A produção será confirmada pela Gelatos Lele.' : 'Escolha por tipo e toque em um sabor para informar a quantidade.') + '</span></div><button type="button" class="catalog-refresh" data-action="refresh-catalog">Atualizar disponibilidade</button></div>' + products + '</section>' +
@@ -322,6 +389,10 @@
       selectedProductId = '';
       reviewing = false;
       render();
+      if (openCategoryId) {
+        const group = catalogGroups().find(item => String(item.category.id) === String(openCategoryId));
+        if (group) loadCatalogImages(group.products.map(product => product.id));
+      }
       return;
     }
     if (action === 'edit-checkout') { reviewing = false; render(); return; }

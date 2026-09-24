@@ -113,6 +113,12 @@
     if (!result?.payload || !Array.isArray(result.payload.products)) throw new Error('O cardápio ainda está sendo preparado. Tente novamente em instantes.');
     return result.payload;
   }
+  async function getCatalogImages(imageIds) {
+    const ids = Array.isArray(imageIds) ? imageIds.map(value => String(value || '').trim()).filter(Boolean).slice(0, 30) : [];
+    if (!ids.length) return { images: {} };
+    const result = await rpc('gelatos_get_public_images', { p_slug: config.storeSlug, p_image_ids: ids }, false);
+    return { images: result?.images && typeof result.images === 'object' ? result.images : {} };
+  }
   async function placeCustomerOrder(order) {
     return rpc('gelatos_place_customer_order', {
       p_slug: config.storeSlug,
@@ -143,5 +149,5 @@
   }
   function isPasswordRecovery() { return passwordRecovery; }
 
-  window.GelatosCloud = Object.freeze({ config, hasSession, email, signUp, signIn, signOut, resetPassword, updatePassword, isPasswordRecovery, isConnectionError, claimStore, getState, getRevision, saveState, getCatalog, placeCustomerOrder, listMembers, addMember, removeMember, listBackups, restoreBackup });
+  window.GelatosCloud = Object.freeze({ config, hasSession, email, signUp, signIn, signOut, resetPassword, updatePassword, isPasswordRecovery, isConnectionError, claimStore, getState, getRevision, saveState, getCatalog, getCatalogImages, placeCustomerOrder, listMembers, addMember, removeMember, listBackups, restoreBackup });
 })();
