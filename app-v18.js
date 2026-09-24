@@ -4,6 +4,12 @@
   const STORE = 'gelatos-lele-company-v11';
   const OLD_STORE = 'gelatos-lele-company-v10';
   const LAST_SCREEN_KEY = STORE + '-last-screen-v1';
+  // A edição pendente e sua base confirmada precisam sobreviver a fechar o
+  // navegador. Sem isso, uma alteração feita sem sinal podia ser sobrescrita
+  // pela cópia antiga da nuvem na próxima abertura do aplicativo.
+  const CLOUD_DIRTY_KEY = STORE + '-cloud-dirty-v2';
+  const CLOUD_BASE_KEY = STORE + '-cloud-base-v2';
+  const CLOUD_REVISION_KEY = STORE + '-cloud-revision-v2';
   const METHODS = ['Dinheiro', 'Pix', 'Crédito', 'Débito'];
   const $ = (selector, root = document) => root.querySelector(selector);
   const control = (form, name) => form.elements.namedItem(name);
@@ -167,7 +173,7 @@
   const blankData = () => ({
     version: 18,
     supplies: [], recipes: [], productions: [], readyStock: [], orders: [], expenses: [],
-    suppliers: [], purchases: [], productCategories: defaultProductCategories(), notifications: [], notificationKeys: [], openingFinancial: defaultOpeningFinancial(), settings: { ...DEFAULT_SETTINGS }
+    suppliers: [], purchases: [], resellers: [], productCategories: defaultProductCategories(), notifications: [], notificationKeys: [], openingFinancial: defaultOpeningFinancial(), settings: { ...DEFAULT_SETTINGS }
   });
   function normalize(raw) {
     const old = raw && typeof raw === 'object' ? raw : {};
@@ -264,6 +270,17 @@
       openingFinancial: normalizeOpeningFinancial(old.openingFinancial),
       suppliers: Array.isArray(old.suppliers) ? old.suppliers : [],
       purchases: Array.isArray(old.purchases) ? old.purchases : [],
+      resellers: Array.isArray(old.resellers) ? old.resellers.map(item => ({
+        ...item,
+        id: item.id || uid(),
+        name: String(item.name || '').trim(),
+        phone: String(item.phone || '').trim(),
+        city: String(item.city || '').trim(),
+        paymentTerms: String(item.paymentTerms || '').trim(),
+        discountPercent: Math.max(0, Math.min(100, n(item.discountPercent))),
+        notes: String(item.notes || '').trim(),
+        active: item.active !== false
+      })).filter(item => item.name) : [],
       notifications: Array.isArray(old.notifications) ? old.notifications : [],
       notificationKeys: Array.isArray(old.notificationKeys) ? old.notificationKeys : [],
       settings: {
@@ -294,7 +311,7 @@
       'category-edit': 'records-categories'
     };
     const screen = fallback[String(value || '')] || String(value || '');
-    return /^(home|orders-(new|history)|stock-(purchase|ingredient|supply|ready)|recipes|production|finance-(overview|receivable|payable|opening|opening-receive|opening-pay)|reports-(orders|finance|stock)|records-(catalog|suppliers|categories)|tools-(compare|capacity)|settings-(home|cloud|team|appearance|message|catalog|delivery|backup|restore-preview))$/.test(screen) ? screen : 'home';
+    return /^(home|orders-(new|history)|stock-(purchase|ingredient|supply|ready)|recipes|production|finance-(overview|receivable|payable|opening|opening-receive|opening-pay)|reports-(orders|finance|stock)|records-(catalog|suppliers|categories)|resale-(dashboard|new|history|people)|tools-(compare|capacity)|settings-(home|cloud|team|appearance|message|catalog|delivery|backup|restore-preview))$/.test(screen) ? screen : 'home';
   }
   function loadLastScreen() {
     try { return resumableScreen(localStorage.getItem(LAST_SCREEN_KEY)); }
@@ -325,8 +342,12 @@
   // falando com a nuvem. Antes, uma queda temporária podia deixar a alteração
   // só neste celular, sem uma nova tentativa automática.
   let cloudLastSuccessAt = '';
+  let cloudLastReadAt = '';
   let cloudLastError = '';
   let cloudRetryDelay = 5000;
+  let cloudDirty = false;
+  let cloudInitialLoad = Boolean(window.GelatosCloud?.hasSession?.() && !window.GelatosCloud?.isPasswordRecovery?.());
+  let cloudBooting = false;
   let orderSubmitting = false;
   let deferredInstall = null;
   const state = {
@@ -336,6 +357,9 @@
     info: null,
     orderLines: [{ productId: '', quantity: 1 }],
     orderDraft: null,
+    resaleLines: [{ productId: '', quantity: 1, saleUnitPrice: '' }],
+    resaleDraft: null,
+    editReseller: '',
     recipeLines: [{ supplyId: '', quantity: '', unit: '' }],
     recipeDraft: null,
     editOrder: '',
@@ -367,9 +391,63 @@
     state.screen = 'settings-cloud';
     state.cloudAuthView = 'update-password';
   } else if (window.GelatosCloud && !window.GelatosCloud.hasSession()) state.screen = 'settings-cloud';
-  function saveLocal() { localStorage.setItem(STORE, JSON.stringify(data)); }
+  function saveLocal() {
+    try { localStorage.setItem(STORE, JSON.stringify(data)); return true; }
+    catch (_) { return false; }
+  }
   const cloneData = value => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
   const sameData = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+  function storedCloudRevision() {
+    try {
+      const value = Number(localStorage.getItem(CLOUD_REVISION_KEY));
+      return Number.isFinite(value) && value >= 0 ? value : null;
+    } catch (_) { return null; }
+  }
+  function storedCloudBase() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(CLOUD_BASE_KEY) || 'null');
+      return raw && typeof raw === 'object' ? normalize(raw) : null;
+    } catch (_) { return null; }
+  }
+  function storedCloudDirty() {
+    try { return localStorage.getItem(CLOUD_DIRTY_KEY) === '1'; }
+    catch (_) { return false; }
+  }
+  function rememberCloudBase(snapshot, revision) {
+    cloudBaseData = cloneData(normalize(snapshot));
+    cloudRevision = Number(revision);
+    try {
+      localStorage.setItem(CLOUD_BASE_KEY, JSON.stringify(cloudBaseData));
+      localStorage.setItem(CLOUD_REVISION_KEY, String(cloudRevision));
+    } catch (_) {
+      // A cópia principal continua no armazenamento do app. Se a base não
+      // couber, preferimos manter os dados locais a apagar uma edição pendente.
+    }
+  }
+  function setCloudDirty(value) {
+    cloudDirty = Boolean(value);
+    try {
+      if (cloudDirty) localStorage.setItem(CLOUD_DIRTY_KEY, '1');
+      else localStorage.removeItem(CLOUD_DIRTY_KEY);
+    } catch (_) { /* O aplicativo segue com a cópia em memória. */ }
+  }
+  function clearCloudMetadata() {
+    cloudRevision = null;
+    cloudBaseData = null;
+    setCloudDirty(false);
+    try {
+      localStorage.removeItem(CLOUD_BASE_KEY);
+      localStorage.removeItem(CLOUD_REVISION_KEY);
+    } catch (_) { /* O próximo acesso ainda poderá carregar a empresa. */ }
+  }
+  cloudRevision = storedCloudRevision();
+  cloudBaseData = storedCloudBase();
+  cloudDirty = storedCloudDirty();
+  if (cloudDirty && !cloudBaseData) {
+    // Para instalações que receberam a atualização durante uma edição, a
+    // cópia atual vira a referência mais segura para a primeira conciliação.
+    rememberCloudBase(data, cloudRevision === null ? 0 : cloudRevision);
+  }
   const isRecord = value => value && typeof value === 'object' && !Array.isArray(value);
   function recordKey(value) {
     if (!isRecord(value)) return '';
@@ -445,23 +523,32 @@
     }
     return { merged, conflicts };
   }
-  let cloudDirty = false;
   function cloudSaved() {
     cloudLastSuccessAt = new Date().toISOString();
     cloudLastError = '';
     cloudRetryDelay = 5000;
   }
+  function cloudRead() {
+    cloudLastReadAt = new Date().toISOString();
+  }
   function cloudFailed(error) {
-    cloudLastError = window.GelatosCloud?.isConnectionError?.(error)
+    const message = String(error?.message || '');
+    cloudLastError = /acesso administrativo|empresa n[aã]o encontrada/i.test(message)
+      ? 'Este acesso ainda não está vinculado à empresa. Use o código de ativação no celular que contém os cadastros corretos.'
+      : window.GelatosCloud?.isConnectionError?.(error)
       ? 'A nuvem está indisponível neste momento. A alteração ficou guardada neste celular e será tentada novamente.'
       : 'Não foi possível confirmar a sincronização agora. A alteração ficou guardada neste celular e será tentada novamente.';
   }
   function retryCloudSave() {
-    if (!cloudDirty || cloudRevision === null || !window.GelatosCloud?.hasSession()) return;
+    if (!window.GelatosCloud?.hasSession()) return;
     clearTimeout(cloudSyncTimer);
     const delay = cloudRetryDelay;
     cloudRetryDelay = Math.min(cloudRetryDelay * 2, 300000);
-    cloudSyncTimer = setTimeout(() => syncCloudNow(true), delay);
+    cloudSyncTimer = setTimeout(() => {
+      if (cloudRevision === null) loadCloudOnStart(false);
+      else if (cloudDirty) syncCloudNow(true);
+      else refreshFromCloud(true);
+    }, delay);
   }
   async function syncCloudNow(silent = false) {
     if (cloudSaving || cloudRevision === null || !window.GelatosCloud?.hasSession()) return;
@@ -469,9 +556,8 @@
     try {
       const sent = cloneData(data);
       const saved = await window.GelatosCloud.saveState(sent, cloudRevision);
-      cloudRevision = Number(saved.revision);
-      cloudBaseData = cloneData(sent);
-      cloudDirty = !sameData(data, sent);
+      rememberCloudBase(sent, saved.revision);
+      setCloudDirty(!sameData(data, sent));
       cloudSaved();
       if (cloudDirty) queueCloudSave();
       if (!silent) toast('Alterações salvas na nuvem.');
@@ -481,12 +567,11 @@
           const latest = await window.GelatosCloud.getState();
           const reconciliation = reconcileCloudState(latest.state);
           data = reconciliation.merged;
-          cloudRevision = Number(latest.revision);
+          rememberCloudBase(latest.state, latest.revision);
           const mergedSnapshot = cloneData(data);
           const saved = await window.GelatosCloud.saveState(mergedSnapshot, cloudRevision);
-          cloudRevision = Number(saved.revision);
-          cloudBaseData = cloneData(mergedSnapshot);
-          cloudDirty = !sameData(data, mergedSnapshot);
+          rememberCloudBase(mergedSnapshot, saved.revision);
+          setCloudDirty(!sameData(data, mergedSnapshot));
           cloudSaved();
           saveLocal();
           render();
@@ -507,25 +592,25 @@
     } finally { cloudSaving = false; }
   }
   function queueCloudSave() {
-    if (cloudRevision === null || !window.GelatosCloud?.hasSession()) return;
+    if (!window.GelatosCloud?.hasSession()) return;
     clearTimeout(cloudSyncTimer);
-    cloudSyncTimer = setTimeout(() => syncCloudNow(true), 800);
+    cloudSyncTimer = setTimeout(() => cloudRevision === null ? loadCloudOnStart(false) : syncCloudNow(true), 800);
   }
-  const save = () => { saveLocal(); cloudDirty = true; queueCloudSave(); };
+  const save = () => { saveLocal(); setCloudDirty(true); queueCloudSave(); };
   async function refreshFromCloud(silent = true) {
-    if (cloudPolling || cloudRevision === null || !window.GelatosCloud?.hasSession() || document.hidden) return;
+    if (cloudPolling || !window.GelatosCloud?.hasSession() || document.hidden) return;
+    if (cloudRevision === null) { loadCloudOnStart(false); return; }
     cloudPolling = true;
     try {
       const revision = await window.GelatosCloud.getRevision();
-      cloudSaved();
+      cloudRead();
       if (Number(revision.revision) <= Number(cloudRevision)) return;
       const latest = await window.GelatosCloud.getState();
       if (Number(latest.revision) > Number(cloudRevision)) {
         if (cloudDirty) {
           const reconciliation = reconcileCloudState(latest.state);
           data = reconciliation.merged;
-          cloudRevision = Number(latest.revision);
-          cloudBaseData = cloneData(normalize(latest.state));
+          rememberCloudBase(latest.state, latest.revision);
           saveLocal();
           render();
           queueCloudSave();
@@ -533,8 +618,8 @@
           return;
         }
         data = normalize(latest.state);
-        cloudRevision = Number(latest.revision);
-        cloudBaseData = cloneData(data);
+        rememberCloudBase(data, latest.revision);
+        setCloudDirty(false);
         cloudSaved();
         saveLocal();
         render();
@@ -546,20 +631,36 @@
     }
     finally { cloudPolling = false; }
   }
-  async function loadCloudOnStart() {
-    if (!window.GelatosCloud?.hasSession()) return;
+  async function loadCloudOnStart(initial = true) {
+    if (!window.GelatosCloud?.hasSession() || window.GelatosCloud?.isPasswordRecovery?.() || cloudBooting) return;
+    cloudBooting = true;
     try {
       const remote = await window.GelatosCloud.getState();
-      data = normalize(remote.state);
-      cloudRevision = Number(remote.revision);
-      cloudBaseData = cloneData(data);
-      cloudDirty = false;
+      cloudRead();
+      if (cloudDirty) {
+        const reconciliation = reconcileCloudState(remote.state);
+        data = reconciliation.merged;
+        rememberCloudBase(remote.state, remote.revision);
+        setCloudDirty(!sameData(data, normalize(remote.state)));
+        saveLocal();
+        if (cloudDirty) queueCloudSave();
+      } else {
+        data = normalize(remote.state);
+        rememberCloudBase(data, remote.revision);
+        setCloudDirty(false);
+        saveLocal();
+      }
       cloudSaved();
-      saveLocal();
-      render();
     } catch (error) {
       cloudFailed(error);
-      /* Sem internet, o aplicativo continua com a última cópia salva neste celular. */
+      // Sem sinal, mantemos a cópia deste celular e tentamos novamente. A base
+      // confirmada permanece guardada para que a reconciliação não apague nada.
+      if (!cloudBaseData) rememberCloudBase(data, cloudRevision === null ? 0 : cloudRevision);
+      if (!/acesso administrativo|empresa n[aã]o encontrada/i.test(String(error?.message || ''))) retryCloudSave();
+    } finally {
+      cloudBooting = false;
+      if (initial) cloudInitialLoad = false;
+      render();
     }
   }
   async function confirmLatestStock() {
@@ -572,8 +673,8 @@
       const latest = await window.GelatosCloud.getState();
       if (Number(latest.revision) > Number(cloudRevision)) {
         data = cloudDirty ? reconcileCloudState(latest.state).merged : normalize(latest.state);
-        cloudRevision = Number(latest.revision);
-        cloudBaseData = cloneData(normalize(latest.state));
+        rememberCloudBase(latest.state, latest.revision);
+        setCloudDirty(!sameData(data, normalize(latest.state)));
         saveLocal();
         render();
         if (cloudDirty) queueCloudSave();
@@ -732,6 +833,7 @@
     else if (route.startsWith('orders:')) state.screen = 'orders-' + route.split(':')[1];
     else if (route.startsWith('stock:')) state.screen = 'stock-' + route.split(':')[1];
     else if (route.startsWith('finance:')) state.screen = 'finance-' + route.split(':')[1];
+    else if (route.startsWith('resale:')) state.screen = 'resale-' + route.split(':')[1];
     else if (route.startsWith('reports:')) {
       const [, kind, preset] = route.split(':');
       state.screen = 'reports-' + kind;
@@ -771,12 +873,14 @@
     return '<section class="nav-group ' + (open ? 'open' : '') + '"><button class="nav-heading" data-menu="' + group + '">' + esc(label) + '<span>⌄</span></button><div class="nav-children">' + children.map(child => '<button data-route="' + child[1] + '">' + esc(child[0]) + '</button>').join('') + '</div></section>';
   }
   function shell() {
+    if (cloudInitialLoad) return '<div class="boot cloud-boot"><strong>Conectando sua empresa…</strong><span>Estamos conferindo a cópia mais recente antes de liberar alterações.</span></div><div id="toast" role="status" aria-live="polite"></div>';
     const needsAuth = state.screen === 'settings-cloud' && (!window.GelatosCloud?.hasSession() || window.GelatosCloud?.isPasswordRecovery?.());
     if (needsAuth) return '<div class="auth-shell">' + settingsScreen() + '</div><div id="toast" role="status" aria-live="polite"></div>';
     const unread = data.notifications.filter(item => !item.read).length;
     return '<div class="app-shell"><header class="topbar"><button class="icon-button" data-action="open-menu" aria-label="Abrir menu">☰</button><img class="brand" src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="bell-button" data-action="open-notices" aria-label="Notificações">🔔' + (unread ? '<b>' + unread + '</b>' : '') + '</button><button id="installCta" class="install-cta" hidden>Instalar</button></header><div class="drawer-shade" data-action="close-menu"></div><aside class="drawer"><div class="drawer-brand"><img src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="icon-button" data-action="close-menu" aria-label="Fechar menu">×</button></div><nav><button class="nav-home" data-route="home">Tela inicial</button>' +
       navGroup('Controle de pedidos', 'orders', [['Novo pedido', 'orders:new'], ['Pedidos realizados', 'orders:history']]) +
       navGroup('Controle de estoque', 'stock', [['Cadastrar compra', 'stock:purchase'], ['Estoque produzido', 'stock:ready'], ['Estoque de insumos', 'stock:supply'], ['Estoque de ingredientes', 'stock:ingredient'], ['Produções', 'production'], ['Nova receita', 'recipes']]) +
+      navGroup('Revendas', 'resale', [['Visão das revendas', 'resale:dashboard'], ['Nova venda para revenda', 'resale:new'], ['Vendas para revenda', 'resale:history'], ['Cadastro de revendedores', 'resale:people']]) +
       navGroup('Financeiro', 'finance', [['Visão financeira', 'finance:overview'], ['Contas a receber', 'finance:receivable'], ['Contas pagas', 'finance:payable'], ['Fechamento inicial', 'finance:opening']]) +
       navGroup('Relatórios', 'reports', [['Pedidos', 'reports:orders'], ['Financeiro', 'reports:finance'], ['Estoque', 'reports:stock']]) +
       navGroup('Cadastros', 'records', [['Cardápio / sabores', 'records:catalog'], ['Categorias de geladinho', 'records:categories'], ['Ingredientes', 'stock:ingredient'], ['Insumos', 'stock:supply'], ['Fornecedores', 'records:suppliers']]) +
@@ -828,6 +932,7 @@
     if (state.screen === 'recipes') return recipeScreen();
     if (state.screen === 'recipe-view') return recipeViewScreen();
     if (state.screen === 'production') return productionScreen();
+    if (state.screen.startsWith('resale-')) return resaleScreen();
     if (state.screen === 'production-edit') return productionEditScreen();
     if (state.screen.startsWith('finance-')) return financeScreen();
     if (state.screen.startsWith('reports-')) return reportsScreen();
@@ -1041,7 +1146,7 @@
   }
   function ordersScreen() {
     if (state.screen === 'orders-history') {
-      const cards = data.orders.filter(order => !order.archived).slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(orderCard).join('') || empty('Nenhum pedido criado ainda.');
+      const cards = data.orders.filter(order => !order.archived && order.source !== 'revenda').slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(orderCard).join('') || empty('Nenhum pedido criado ainda.');
       return '<section class="screen active">' + heading('Controle de pedidos', 'Pedidos realizados', 'Acompanhe encomendas, produção, reservas, pagamento e separação. O histórico financeiro continua preservado.') + '<div class="list">' + cards + '</div></section>';
     }
     const draft = { customer: '', phone: '', payment: 'Pix', date: today(), dueDate: today(), orderKind: 'ready', scheduledFor: scheduledMinDate(), deliveryMode: defaultOrderDeliveryMode(), zoneId: '', address: '', ...(state.orderDraft || {}) };
@@ -1075,6 +1180,122 @@
       dateField +
       field('Data do pedido', '<input name="date" type="date" value="' + esc(draft.date) + '">') +
       '</div><div class="section-line"><div><h3>Itens</h3><p>' + (scheduled ? 'Você pode incluir qualquer sabor ativo. Os que já estiverem prontos serão separados ao salvar; os demais ficam pendentes de produção.' : 'A situação do pedido continua paga, pendente ou cancelada.') + '</p></div></div><div class="line-list">' + orderLinesMarkup() + '</div><button type="button" class="outline full" data-action="add-order-line">+ Adicionar outro geladinho</button><section class="order-fulfillment"><h3>Entrega ou retirada</h3>' + orderFulfillmentFields(draft) + '</section>' + orderTotalMarkup(draft) + '<div class="button-row"><button class="primary">Salvar alterações</button><button class="outline" type="button" data-route="orders:history">Cancelar</button></div></form></section>';
+  }
+  // Revenda começa com o modelo mais simples e seguro: a revendedora compra
+  // o lote, o estoque sai na hora e o valor entra em contas a receber. A
+  // consignação pode ser construída depois sem misturar dinheiro e estoque.
+  const resellerById = () => byId(data.resellers || []);
+  const activeResellers = () => (data.resellers || []).filter(item => item.active !== false);
+  const resaleOrders = () => data.orders.filter(order => order.source === 'revenda' && !order.archived);
+  function resaleDraftFromForm(form = $('#resaleForm')) {
+    const f = form?.elements;
+    return {
+      resellerId: f?.resellerId?.value || state.resaleDraft?.resellerId || '',
+      payment: f?.payment?.value || state.resaleDraft?.payment || 'Pix',
+      date: f?.date?.value || state.resaleDraft?.date || today(),
+      dueDate: f?.dueDate?.value || state.resaleDraft?.dueDate || today(),
+      paidNow: f?.paidNow?.checked || false,
+      note: f?.note?.value || state.resaleDraft?.note || ''
+    };
+  }
+  function suggestedResalePrice(productId, resellerId = resaleDraftFromForm().resellerId) {
+    const product = ready()[productId];
+    const recipe = recipeById()[productId];
+    const retail = n(product?.saleUnitPrice || recipe?.saleUnitPrice);
+    const discount = n(resellerById()[resellerId]?.discountPercent);
+    return round(retail * Math.max(0, 1 - discount / 100));
+  }
+  function resaleLines() {
+    const grouped = {};
+    state.resaleLines.forEach(line => {
+      if (!line.productId || !(n(line.quantity) > 0)) return;
+      const key = String(line.productId);
+      const unitPrice = n(line.saleUnitPrice);
+      if (!grouped[key]) grouped[key] = { productId: key, quantity: 0, saleUnitPrice: unitPrice };
+      grouped[key].quantity = qty(grouped[key].quantity + n(line.quantity));
+      if (unitPrice > 0) grouped[key].saleUnitPrice = unitPrice;
+    });
+    return Object.values(grouped).map(line => {
+      const product = ready()[line.productId];
+      const recipe = recipeById()[line.productId];
+      const price = n(line.saleUnitPrice || suggestedResalePrice(line.productId));
+      return { ...line, productName: product?.name || recipe?.name || 'Geladinho', saleUnitPrice: price, unitCost: n(product?.unitCost), available: n(product?.quantity) };
+    });
+  }
+  function resaleSummary() {
+    const lines = resaleLines();
+    const subtotal = round(lines.reduce((sum, line) => sum + n(line.quantity) * n(line.saleUnitPrice), 0));
+    const cost = round(lines.reduce((sum, line) => sum + n(line.quantity) * n(line.unitCost), 0));
+    const shortages = lines.filter(line => n(line.quantity) > n(line.available));
+    return { lines, subtotal, cost, profit: round(subtotal - cost), shortages };
+  }
+  function resaleProductOptions(selected) {
+    const entries = data.readyStock.slice().sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+    return '<option value="">Selecione um sabor</option>' + entries.map(product => '<option value="' + esc(product.recipeId) + '"' + (String(product.recipeId) === String(selected) ? ' selected' : '') + (n(product.quantity) > 0 ? '' : ' disabled') + '>' + esc(product.name + ' · ' + qtyText(product.quantity) + ' un. em estoque · varejo ' + money(product.saleUnitPrice)) + '</option>').join('');
+  }
+  function resaleLineMarkup() {
+    return state.resaleLines.map((line, index) => '<div class="resale-line"><select data-resale-product="' + index + '">' + resaleProductOptions(line.productId) + '</select><input data-resale-quantity="' + index + '" inputmode="decimal" value="' + esc(line.quantity) + '" aria-label="Quantidade" placeholder="Quantidade"><input data-resale-price="' + index + '" inputmode="decimal" value="' + esc(String(line.saleUnitPrice || '').replace('.', ',')) + '" aria-label="Preço por unidade" placeholder="Preço por un."><button class="line-remove" type="button" data-action="remove-resale-line" data-index="' + index + '" aria-label="Remover sabor">×</button></div>').join('');
+  }
+  function resalePreview() {
+    const summary = resaleSummary();
+    const shortage = summary.shortages.length ? '<p id="resaleStockWarning" class="form-note"><b>Estoque insuficiente:</b> ' + summary.shortages.map(line => esc(line.productName + ' (tem ' + qtyText(line.available) + ', pedido ' + qtyText(line.quantity) + ')')).join('; ') + '.</p>' : '<p id="resaleStockWarning" class="form-note">Ao salvar, o lote será separado do estoque produzido e ficará registrado em Contas a receber até o pagamento.</p>';
+    return '<section class="calculation-row calculation-breakdown"><span>Total da revenda</span><b id="resaleTotalPreview">' + money(summary.subtotal) + '</b><span>Custo do estoque separado</span><b id="resaleCostPreview">' + money(summary.cost) + '</b><strong>Lucro bruto previsto</strong><strong id="resaleProfitPreview">' + money(summary.profit) + '</strong></section>' + shortage;
+  }
+  function updateResalePreview() {
+    const summary = resaleSummary();
+    const set = (id, value) => { const element = $('#' + id); if (element) element.textContent = value; };
+    set('resaleTotalPreview', money(summary.subtotal));
+    set('resaleCostPreview', money(summary.cost));
+    set('resaleProfitPreview', money(summary.profit));
+    const warning = $('#resaleStockWarning');
+    if (warning) warning.innerHTML = summary.shortages.length ? '<b>Estoque insuficiente:</b> ' + summary.shortages.map(line => esc(line.productName + ' (tem ' + qtyText(line.available) + ', pedido ' + qtyText(line.quantity) + ')')).join('; ') + '.' : 'Ao salvar, o lote será separado do estoque produzido e ficará registrado em Contas a receber até o pagamento.';
+  }
+  function resaleOrderCard(order) {
+    const reseller = resellerById()[order.resellerId];
+    const lines = (order.items || []).map(line => '<li>' + qtyText(line.quantity) + ' × ' + esc(line.productName) + ' — ' + money(line.total) + '</li>').join('');
+    const locked = ['cancelled', 'expired'].includes(order.status);
+    let actions = '';
+    if (order.status === 'confirmed') actions += '<button class="primary" data-action="mark-paid" data-id="' + esc(order.id) + '">Marcar como recebido</button>';
+    if (!locked) actions += '<button class="outline" data-action="cancel-order" data-id="' + esc(order.id) + '">Cancelar e devolver estoque</button>';
+    actions += '<button class="outline danger-button" data-action="delete-order" data-id="' + esc(order.id) + '">Arquivar</button>';
+    return detail(order.customer, brDate(order.date) + ' · vence ' + brDate(order.dueDate) + ' · ' + esc(order.paymentMethod), money(order.total), orderStatus(order), '<dl><dt>Revendedora</dt><dd>' + esc(reseller?.name || order.customer) + '</dd><dt>WhatsApp</dt><dd>' + esc(order.phone || reseller?.phone || 'não informado') + '</dd><dt>Prazo combinado</dt><dd>' + esc(reseller?.paymentTerms || 'não informado') + '</dd><dt>Custo separado</dt><dd>' + money(order.cost) + '</dd><dt>Lucro da revenda</dt><dd>' + money(order.profit) + '</dd></dl><h4>Itens</h4><ul>' + lines + '</ul><div class="details-actions">' + actions + '</div>');
+  }
+  function resellerFormScreen() {
+    const editing = state.editReseller ? resellerById()[state.editReseller] : null;
+    const base = editing || { name: '', phone: '', city: '', paymentTerms: '', discountPercent: '', notes: '', active: true };
+    return '<section class="screen active">' + heading('Revendas', editing ? 'Editar revendedora' : 'Cadastrar revendedora', 'Registre quem compra para revender. Cada venda sai do estoque e fica em contas a receber até você marcar o pagamento.') + '<form id="resellerForm" class="panel form-panel"><input type="hidden" name="id" value="' + esc(editing?.id || '') + '"><div class="form-grid two">' +
+      field('Nome', '<input name="name" required value="' + esc(base.name) + '" placeholder="Ex.: Ana Silva">') +
+      field('WhatsApp', '<input name="phone" inputmode="tel" value="' + esc(base.phone) + '" placeholder="Ex.: 11999999999">') +
+      field('Cidade ou bairro', '<input name="city" value="' + esc(base.city) + '" placeholder="Ex.: Centro">') +
+      field('Prazo de pagamento', '<input name="paymentTerms" value="' + esc(base.paymentTerms) + '" placeholder="Ex.: semanal, 7 dias">') +
+      field('Desconto padrão sobre varejo (%)', '<input name="discountPercent" inputmode="decimal" value="' + esc(String(base.discountPercent || '').replace('.', ',')) + '" placeholder="Ex.: 20">', 'Só sugere um preço na nova venda. Você poderá alterar o preço de cada sabor antes de salvar.') +
+      '</div><label class="form-field"><span>Observações</span><textarea name="notes" rows="3" placeholder="Ex.: retira toda sexta-feira.">' + esc(base.notes) + '</textarea></label><label class="catalog-switch"><input name="active" type="checkbox"' + (base.active !== false ? ' checked' : '') + '> Cadastro ativo</label><div class="button-row"><button class="primary">Salvar revendedora</button><button class="outline" type="button" data-route="resale:people">Cancelar</button></div></form></section>';
+  }
+  function resaleScreen() {
+    if (state.screen === 'resale-people-edit') return resellerFormScreen();
+    if (state.screen === 'resale-people') {
+      const cards = (data.resellers || []).slice().sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')).map(reseller => {
+        const sales = resaleOrders().filter(order => String(order.resellerId) === String(reseller.id));
+        const outstanding = sales.filter(order => order.status === 'confirmed').reduce((sum, order) => sum + n(order.total), 0);
+        const body = '<dl><dt>WhatsApp</dt><dd>' + esc(reseller.phone || 'não informado') + '</dd><dt>Região</dt><dd>' + esc(reseller.city || 'não informada') + '</dd><dt>Prazo</dt><dd>' + esc(reseller.paymentTerms || 'a combinar') + '</dd><dt>Desconto padrão</dt><dd>' + n(reseller.discountPercent).toLocaleString('pt-BR') + '%</dd><dt>A receber</dt><dd>' + money(outstanding) + '</dd></dl><div class="details-actions"><button class="outline" data-action="edit-reseller" data-id="' + esc(reseller.id) + '">Editar</button><button class="outline danger-button" data-action="delete-reseller" data-id="' + esc(reseller.id) + '">' + (sales.length ? 'Desativar' : 'Excluir') + '</button></div>';
+        return detail(reseller.name, (reseller.active === false ? 'Cadastro desativado' : 'Cadastro ativo') + ' · ' + sales.length + ' venda(s)', '', reseller.active === false ? 'inativo' : 'ativo', body);
+      }).join('') || empty('Cadastre a primeira revendedora para iniciar vendas por lote.');
+      return '<section class="screen active">' + heading('Revendas', 'Cadastro de revendedoras', 'Mantenha contatos, prazo combinado e desconto padrão em um lugar só.') + '<div class="isolated-actions"><button class="primary" data-action="new-reseller">Cadastrar revendedora</button><button class="secondary" data-route="resale:new">Nova venda</button></div><div class="list">' + cards + '</div></section>';
+    }
+    if (state.screen === 'resale-history') {
+      const cards = resaleOrders().slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(resaleOrderCard).join('') || empty('Nenhuma venda para revenda registrada ainda.');
+      return '<section class="screen active">' + heading('Revendas', 'Vendas para revenda', 'Cada venda mostra o estoque separado, o valor a receber e o lucro real quando marcada como paga.') + '<div class="isolated-actions"><button class="primary" data-route="resale:new">Nova venda para revenda</button></div><div class="list">' + cards + '</div></section>';
+    }
+    if (state.screen === 'resale-new') {
+      const draft = { resellerId: '', payment: 'Pix', date: today(), dueDate: today(), paidNow: false, note: '', ...(state.resaleDraft || {}) };
+      const resellerOptions = '<option value="">Selecione a revendedora</option>' + activeResellers().map(item => '<option value="' + esc(item.id) + '"' + (String(item.id) === String(draft.resellerId) ? ' selected' : '') + '>' + esc(item.name + (item.city ? ' · ' + item.city : '')) + '</option>').join('');
+      return '<section class="screen active">' + heading('Revendas', 'Nova venda para revenda', 'Compra direta: o lote sai agora do estoque pronto e o valor fica em Contas a receber até o pagamento.') + (activeResellers().length ? '<form id="resaleForm" class="panel form-panel"><div class="form-grid two">' + field('Revendedora', '<select name="resellerId" required>' + resellerOptions + '</select>') + field('Forma de recebimento', '<select name="payment">' + METHODS.map(method => '<option' + (method === draft.payment ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') + field('Data da venda', '<input name="date" type="date" value="' + esc(draft.date) + '">') + field('Vencimento combinado', '<input name="dueDate" type="date" value="' + esc(draft.dueDate) + '">') + '</div><label class="catalog-switch"><input name="paidNow" type="checkbox"' + (draft.paidNow ? ' checked' : '') + '> Já recebi este valor</label><div class="section-line"><div><h3>Lote separado</h3><p>Selecione os sabores prontos, a quantidade e o preço que a revendedora pagará por unidade.</p></div></div><div class="resale-table-title"><span>Sabor</span><span>Quantidade</span><span>Preço por un.</span><span></span></div><div class="resale-lines">' + resaleLineMarkup() + '</div><button type="button" class="outline full" data-action="add-resale-line">+ Adicionar outro sabor</button><label class="form-field"><span>Observação</span><textarea name="note" rows="2" placeholder="Ex.: lote entregue em 24/09.">' + esc(draft.note) + '</textarea></label>' + resalePreview() + '<button class="primary full">Confirmar venda e separar lote</button></form>' : '<section class="panel"><p>Antes da primeira venda, cadastre a revendedora para manter o controle correto de prazo, contato e contas a receber.</p><button class="primary full" data-action="new-reseller">Cadastrar revendedora</button></section>') + '</section>';
+    }
+    const sales = resaleOrders();
+    const open = sales.filter(order => order.status === 'confirmed').reduce((sum, order) => sum + n(order.total), 0);
+    const paid = sales.filter(order => order.status === 'paid').reduce((sum, order) => sum + n(order.total), 0);
+    const profit = sales.filter(order => order.status === 'paid').reduce((sum, order) => sum + n(order.profit), 0);
+    return '<section class="screen active">' + heading('Revendas', 'Visão das revendas', 'Acompanhe lotes vendidos para revender, valores a receber e o lucro efetivamente recebido.') + '<div class="dashboard-grid">' + metric('Revendedoras ativas', 'resalePeople', 'Cadastros ativos', 'resale:people', true) + metric('Lotes a receber', 'resaleReceivable', 'Vendas ainda não recebidas', 'finance:receivable') + metric('Recebido em revendas', 'resalePaid', 'Vendas já marcadas como pagas', 'resale:history') + metric('Lucro recebido', 'resaleProfit', 'Após custo e taxas', 'resale:history') + '</div><section class="panel"><h2>Como funciona</h2><p>Esta primeira etapa é compra direta: o estoque reduz no momento da venda, a revendedora fica com um valor a pagar e você marca “recebido” quando o pagamento entrar. Consignação ficará separada para não confundir dinheiro, retorno e estoque.</p><div class="button-row"><button class="primary" data-route="resale:new">Nova venda para revenda</button><button class="outline" data-route="resale:people">Gerenciar revendedoras</button></div></section></section>';
   }
   function stockScreen() {
     if (state.screen === 'stock-purchase') return purchaseScreen();
@@ -1368,7 +1589,7 @@
     let rows = [];
     if (kind === 'orders') rows = data.orders.map(order => {
       const location = orderDestination(order);
-      return { date: day(order.date), name: order.customer, items: order.items.map(line => line.productName).join(', '), payment: order.paymentMethod, status: orderStatus(order), location, address: String(order.address || '').trim(), value: n(order.total), search: order.customer + ' ' + location + ' ' + String(order.address || '') + ' ' + order.items.map(line => line.productName).join(' ') };
+      return { date: day(order.date), name: order.source === 'revenda' ? 'Revenda · ' + order.customer : order.customer, items: order.items.map(line => line.productName).join(', '), payment: order.paymentMethod, status: orderStatus(order), location, address: String(order.address || '').trim(), value: n(order.total), search: order.customer + ' ' + (order.source === 'revenda' ? 'revenda revendedora' : 'pedido cliente') + ' ' + location + ' ' + String(order.address || '') + ' ' + order.items.map(line => line.productName).join(' ') };
     });
     if (kind === 'finance') {
       const opening = openingFinancial();
@@ -1613,7 +1834,7 @@
     const section = state.screen.replace('settings-', '');
     if (section === 'cloud') {
       const signedIn = window.GelatosCloud?.hasSession();
-      const synced = cloudRevision !== null;
+      const synced = cloudRevision !== null && !cloudDirty && !cloudLastError;
       const authError = state.cloudAuthError ? '<p class="auth-error" role="alert">' + esc(state.cloudAuthError) + '</p>' : '';
       const authLogo = '<img class="auth-logo" src="' + esc(homeLogo()) + '" alt="Gelatos Lele">';
       if (window.GelatosCloud?.isPasswordRecovery?.() || state.cloudAuthView === 'update-password') {
@@ -1626,12 +1847,22 @@
         return '<section class="auth-screen"><div class="auth-card">' + authLogo + '<div class="auth-form"><h1>Confira seu e-mail</h1><p class="auth-note">Se este e-mail estiver cadastrado, enviamos um link para redefinir a senha.</p><button class="primary full" type="button" data-action="cloud-auth-signin">Voltar para entrar</button></div></div></section>';
       }
       if (!signedIn) return '<section class="auth-screen"><div class="auth-card">' + authLogo + '<form id="cloudAuthForm" class="auth-form"><h1>Entrar</h1><label>E-mail<input name="email" type="email" autocomplete="email" required value="' + esc(state.cloudAuthEmail) + '" placeholder="voce@exemplo.com"></label><label>Senha<input name="password" type="password" autocomplete="current-password" minlength="8" required></label>' + authError + '<button class="primary full">Entrar</button><button class="auth-link" type="button" data-action="cloud-auth-reset">Esqueci minha senha</button></form></div></section>';
-      const cloudStatus = cloudLastError
-        ? '<p class="form-note">' + esc(cloudLastError) + '</p>'
-        : cloudLastSuccessAt
-          ? '<p class="form-note">Última confirmação da nuvem: ' + esc(brDateTime(cloudLastSuccessAt)) + '.</p>'
-          : '<p class="form-note">Conferindo a nuvem…</p>';
-      return '<section class="screen active">' + heading('Configurações', 'Nuvem e sincronização', synced ? 'Sua empresa está sincronizada. Alterações feitas em um celular aparecem no outro.' : 'Ative a empresa e envie os dados deste celular uma única vez.') + '<section class="panel"><h2>Acesso conectado</h2><p>' + esc(window.GelatosCloud.email() || 'E-mail conectado') + '</p><span class="badge ' + (synced ? 'paid' : 'pending') + '">' + (synced ? 'sincronizado' : 'aguardando ativação') + '</span>' + cloudStatus + '</section>' + (synced ? '<section class="panel"><p>Alterações deste celular são guardadas localmente e enviadas automaticamente. Quando o outro celular estiver aberto, ele confere a nuvem em até 20 segundos; “Atualizar agora” faz isso imediatamente.</p><div class="button-row"><button class="secondary" data-action="cloud-refresh">Atualizar agora</button><button class="outline" data-action="cloud-signout">Sair deste celular</button></div></section>' : '<form id="cloudActivateForm" class="panel form-panel"><h2>Ativar e migrar os dados</h2>' + field('Código de ativação', '<input name="activationCode" required autocomplete="off" placeholder="Código recebido no atendimento">', 'Use o código único fornecido para esta primeira ativação. Depois dele, só quem entrar com seu e-mail e senha terá acesso.') + '<button class="primary full">Ativar empresa e enviar dados deste celular</button><p class="form-note">Faça isto no celular que já tem os cadastros corretos. Os dados atuais não serão apagados.</p></form>') + '</section>';
+      const cloudStatus = cloudDirty
+        ? '<p class="form-note"><b>Aguardando envio:</b> esta alteração está segura neste celular e será enviada assim que a nuvem responder.</p>'
+        : cloudLastError
+          ? '<p class="form-note">' + esc(cloudLastError) + '</p>'
+          : cloudLastSuccessAt
+            ? '<p class="form-note">Última sincronização confirmada: ' + esc(brDateTime(cloudLastSuccessAt)) + '.</p>'
+            : cloudLastReadAt
+              ? '<p class="form-note">Nuvem acessível; aguardando a primeira confirmação desta abertura.</p>'
+              : '<p class="form-note">Conferindo a nuvem…</p>';
+      const cloudActivationNeeded = cloudRevision === null && /acesso administrativo|empresa n[aã]o encontrada|ativa[cç][aã]o/i.test(String(cloudLastError || ''));
+      const cloudHelp = cloudRevision !== null
+        ? '<section class="panel"><p>Antes de abrir o sistema, este celular confere a cópia mais recente. Alterações pendentes ficam guardadas mesmo se o app for fechado; quando a internet voltar, elas são enviadas e conciliadas com o outro celular.</p><div class="button-row"><button class="secondary" data-action="cloud-refresh">Atualizar agora</button><button class="outline" data-action="cloud-signout">Sair deste celular</button></div></section>'
+        : cloudActivationNeeded
+          ? '<form id="cloudActivateForm" class="panel form-panel"><h2>Ativar e migrar os dados</h2>' + field('Código de ativação', '<input name="activationCode" required autocomplete="off" placeholder="Código recebido no atendimento">', 'Use o código único fornecido para esta primeira ativação. Depois dele, só quem entrar com seu e-mail e senha terá acesso.') + '<button class="primary full">Ativar empresa e enviar dados deste celular</button><p class="form-note">Faça isto no celular que já tem os cadastros corretos. Os dados atuais não serão apagados.</p></form>'
+        : '<section class="panel caution"><b>Não foi possível confirmar a empresa agora.</b><p>Você pode consultar a cópia deste celular, mas só movimente estoque quando a conexão voltar e o status ficar sincronizado.</p><div class="button-row"><button class="secondary" data-action="cloud-refresh">Tentar novamente</button><button class="outline" data-action="cloud-signout">Sair deste celular</button></div></section>';
+      return '<section class="screen active">' + heading('Configurações', 'Nuvem e sincronização', synced ? 'Sua empresa está sincronizada. Alterações feitas em um celular aparecem no outro.' : cloudDirty ? 'Há uma alteração guardada neste celular aguardando confirmação da nuvem.' : 'Confira a conexão antes de movimentar estoque em mais de um celular.') + '<section class="panel"><h2>Acesso conectado</h2><p>' + esc(window.GelatosCloud.email() || 'E-mail conectado') + '</p><span class="badge ' + (synced ? 'paid' : 'pending') + '">' + (synced ? 'sincronizado' : cloudDirty ? 'aguardando envio' : 'verificar conexão') + '</span>' + cloudStatus + '</section>' + cloudHelp + '</section>';
     }
     if (section === 'team') {
       const members = Array.isArray(state.teamMembers) ? state.teamMembers : [];
@@ -1726,7 +1957,7 @@
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=44';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=45';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -1735,7 +1966,7 @@
   }
   function managementCatalogLink() {
     const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    return base + 'customer.html?v=44&gestao=1';
+    return base + 'customer.html?v=45&gestao=1';
   }
   function noticesPanel() {
     if (!state.notices) return '';
@@ -1768,6 +1999,11 @@
     set('dashPix', money(balances.Pix));
     set('dashCredit', money(balances.Crédito));
     set('dashDebit', money(balances.Débito));
+    const resale = resaleOrders();
+    set('resalePeople', activeResellers().length);
+    set('resaleReceivable', money(resale.filter(order => order.status === 'confirmed').reduce((sum, order) => sum + n(order.total), 0)));
+    set('resalePaid', money(resale.filter(order => order.status === 'paid').reduce((sum, order) => sum + n(order.total), 0)));
+    set('resaleProfit', money(resale.filter(order => order.status === 'paid').reduce((sum, order) => sum + n(order.profit), 0)));
     set('financeRevenue', money(finance().revenue));
     set('financeCost', money(finance().cost));
     set('financeFees', money(finance().paymentFee));
@@ -2043,6 +2279,89 @@
     } finally {
       orderSubmitting = false;
     }
+  }
+  function saveReseller(form) {
+    const f = form.elements;
+    const name = String(f.name.value || '').trim();
+    if (!name) { toast('Informe o nome da revendedora.'); return; }
+    const existing = f.id.value ? resellerById()[f.id.value] : null;
+    const record = {
+      ...(existing || {}),
+      id: existing?.id || uid(),
+      name,
+      phone: String(f.phone.value || '').trim(),
+      city: String(f.city.value || '').trim(),
+      paymentTerms: String(f.paymentTerms.value || '').trim(),
+      discountPercent: Math.max(0, Math.min(100, n(f.discountPercent.value))),
+      notes: String(f.notes.value || '').trim(),
+      active: Boolean(f.active.checked),
+      updatedAt: new Date().toISOString()
+    };
+    if (existing) Object.assign(existing, record);
+    else data.resellers.unshift({ ...record, createdAt: new Date().toISOString() });
+    state.editReseller = '';
+    save();
+    toast('Cadastro da revendedora salvo.');
+    navigate('resale:people');
+  }
+  function deleteReseller(id) {
+    const reseller = resellerById()[id];
+    if (!reseller) return;
+    const hasSales = resaleOrders().some(order => String(order.resellerId) === String(id));
+    if (hasSales) {
+      reseller.active = false;
+      save();
+      toast('A revendedora foi desativada para preservar o histórico das vendas.');
+      render();
+      return;
+    }
+    data.resellers = data.resellers.filter(item => String(item.id) !== String(id));
+    save();
+    toast('Cadastro da revendedora excluído.');
+    render();
+  }
+  async function submitResale(form) {
+    if (orderSubmitting) return;
+    orderSubmitting = true;
+    try {
+      state.resaleDraft = resaleDraftFromForm(form);
+      const draft = state.resaleDraft;
+      const reseller = resellerById()[draft.resellerId];
+      const summary = resaleSummary();
+      if (!reseller) { toast('Selecione a revendedora.'); return; }
+      if (!summary.lines.length) { toast('Inclua pelo menos um sabor e uma quantidade.'); return; }
+      if (summary.lines.some(line => !(n(line.saleUnitPrice) > 0))) { toast('Informe um preço maior que zero para cada sabor.'); return; }
+      if (summary.shortages.length) { toast('Confira o estoque disponível antes de confirmar a revenda.'); return; }
+      if (!await confirmLatestStock()) return;
+      const afterRefresh = resaleSummary();
+      if (afterRefresh.shortages.length) { toast('O estoque mudou. Confira as quantidades e confirme novamente.'); return; }
+      const snapshot = JSON.stringify(data.readyStock);
+      try {
+        const date = draft.date || today();
+        const result = reserveOrder(afterRefresh.lines.map(line => ({ productId: line.productId, quantity: line.quantity, saleUnitPrice: line.saleUnitPrice })), date, 'Venda para revenda: ' + reseller.name);
+        const paymentFee = paymentFeeFor(result.revenue, draft.payment);
+        const paid = Boolean(draft.paidNow);
+        const order = {
+          id: uid(), customer: reseller.name, phone: reseller.phone || '', resellerId: reseller.id,
+          items: result.lines.map(line => ({ ...line, picked: true })),
+          subtotal: result.revenue, freight: 0, total: result.revenue, cost: result.cost,
+          deliveryCost: 0, paymentFee, profit: round(result.revenue - result.cost - paymentFee),
+          paymentMethod: draft.payment, status: paid ? 'paid' : 'confirmed', orderKind: 'ready', stockReserved: true,
+          date, dueDate: draft.dueDate || date, scheduledFor: '', deliveryMode: 'Retirada', deliveryZone: '', zoneId: '', address: '',
+          source: 'revenda', note: draft.note, paidAt: paid ? date : ''
+        };
+        data.orders.unshift(order);
+        addNotice(paid ? 'payment' : 'order', paid ? 'Revenda recebida: ' + reseller.name : 'Revenda a receber: ' + reseller.name, money(order.total) + (paid ? ' recebido em ' : ' com vencimento em ') + (paid ? draft.payment : brDate(order.dueDate)) + '.', paid ? 'reports-finance' : 'finance-receivable');
+        state.resaleLines = [{ productId: '', quantity: 1, saleUnitPrice: '' }];
+        state.resaleDraft = null;
+        save();
+        toast(paid ? 'Revenda salva e pagamento registrado.' : 'Revenda salva. O valor está em Contas a receber.');
+        navigate('resale:history');
+      } catch (error) {
+        data.readyStock = JSON.parse(snapshot);
+        toast(error.message || 'Não foi possível confirmar esta revenda.');
+      }
+    } finally { orderSubmitting = false; }
   }
   function savePurchase(form) {
     const f = form.elements;
@@ -2727,16 +3046,15 @@
       try {
         const remote = await window.GelatosCloud.getState();
         data = normalize(remote.state);
-        cloudRevision = Number(remote.revision);
-        cloudBaseData = cloneData(data);
-        cloudDirty = false;
+        rememberCloudBase(data, remote.revision);
+        setCloudDirty(false);
         cloudSaved();
         saveLocal();
         toast('Dados da empresa carregados da nuvem.');
         navigate('home');
       } catch (error) {
         window.GelatosCloud.signOut();
-        cloudRevision = null;
+        clearCloudMetadata();
         state.cloudAuthError = cloudAuthMessage(error);
         render({ preserveScroll: true });
       }
@@ -2773,11 +3091,10 @@
     if (!code) { toast('Informe o código de ativação.'); return; }
     try {
       const claimed = await window.GelatosCloud.claimStore(code);
-      cloudRevision = Number(claimed.revision);
+      rememberCloudBase(data, claimed.revision);
       const saved = await window.GelatosCloud.saveState(data, cloudRevision);
-      cloudRevision = Number(saved.revision);
-      cloudBaseData = cloneData(data);
-      cloudDirty = false;
+      rememberCloudBase(data, saved.revision);
+      setCloudDirty(false);
       cloudSaved();
       saveLocal();
       toast('Empresa ativada e dados enviados para a nuvem.');
@@ -2787,9 +3104,11 @@
   async function forceCloudRefresh() {
     try {
       const remote = await window.GelatosCloud.getState();
+      cloudRead();
       if (cloudDirty) {
         data = reconcileCloudState(remote.state).merged;
-        cloudRevision = Number(remote.revision);
+        rememberCloudBase(remote.state, remote.revision);
+        setCloudDirty(!sameData(data, normalize(remote.state)));
         cloudSaved();
         saveLocal();
         render();
@@ -2798,8 +3117,8 @@
         return;
       }
       data = normalize(remote.state);
-      cloudRevision = Number(remote.revision);
-      cloudBaseData = cloneData(data);
+      rememberCloudBase(data, remote.revision);
+      setCloudDirty(false);
       cloudSaved();
       saveLocal();
       render();
@@ -2857,9 +3176,8 @@
     try {
       const result = await window.GelatosCloud.restoreBackup(snapshotDate);
       data = normalize(result.state);
-      cloudRevision = Number(result.revision);
-      cloudBaseData = cloneData(data);
-      cloudDirty = false;
+      rememberCloudBase(data, result.revision);
+      setCloudDirty(false);
       saveLocal();
       toast('Versão restaurada da nuvem. Confira os dados antes de continuar.');
       navigate('home');
@@ -2990,6 +3308,11 @@
     }
     if (action === 'add-order-line') { rememberOrderDraft(); state.orderLines.push({ productId: '', quantity: 1 }); render({ preserveScroll: true }); return; }
     if (action === 'remove-order-line') { state.orderLines.splice(n(actionNode.dataset.index), 1); if (!state.orderLines.length) state.orderLines.push({ productId: '', quantity: 1 }); render(); return; }
+    if (action === 'new-reseller') { state.editReseller = ''; state.screen = 'resale-people-edit'; render(); return; }
+    if (action === 'edit-reseller') { if (resellerById()[id]) { state.editReseller = id; state.screen = 'resale-people-edit'; render(); } return; }
+    if (action === 'delete-reseller') { deleteReseller(id); return; }
+    if (action === 'add-resale-line') { state.resaleDraft = resaleDraftFromForm(); state.resaleLines.push({ productId: '', quantity: 1, saleUnitPrice: '' }); render({ preserveScroll: true }); return; }
+    if (action === 'remove-resale-line') { state.resaleLines.splice(n(actionNode.dataset.index), 1); if (!state.resaleLines.length) state.resaleLines.push({ productId: '', quantity: 1, saleUnitPrice: '' }); state.resaleDraft = resaleDraftFromForm(); render({ preserveScroll: true }); return; }
     if (action === 'edit-order') {
       const order = data.orders.find(item => String(item.id) === String(id));
       const matchingZone = deliveryZones(data.settings.deliveryZones).find(zone => zone.name === String(order?.deliveryZone || ''));
@@ -3050,7 +3373,7 @@
     if (action === 'copy-catalog-link') { copyCatalogLink(); return; }
     if (action === 'open-catalog-management') { location.href = managementCatalogLink(); return; }
     if (action === 'cloud-refresh') { forceCloudRefresh(); return; }
-    if (action === 'cloud-signout') { clearTimeout(cloudSyncTimer); cloudRevision = null; window.GelatosCloud.signOut(); toast('Este celular saiu da nuvem. Os dados locais foram mantidos.'); navigate('settings:cloud'); return; }
+    if (action === 'cloud-signout') { clearTimeout(cloudSyncTimer); clearCloudMetadata(); window.GelatosCloud.signOut(); toast('Este celular saiu da nuvem. Os dados locais foram mantidos.'); navigate('settings:cloud'); return; }
     if (action === 'remove-member') { removeTeamMember(id); return; }
     if (action === 'backup') { backup(); return; }
     if (action === 'restore') { $('#restoreFile')?.click(); return; }
@@ -3069,6 +3392,32 @@
   });
   document.addEventListener('change', event => {
     const target = event.target;
+    if (target.matches('[data-resale-product]')) {
+      state.resaleDraft = resaleDraftFromForm();
+      const line = state.resaleLines[n(target.dataset.resaleProduct)];
+      line.productId = target.value;
+      line.saleUnitPrice = target.value ? suggestedResalePrice(target.value, state.resaleDraft.resellerId) : '';
+      render({ preserveScroll: true });
+      return;
+    }
+    if (target.matches('[data-resale-quantity]')) {
+      state.resaleLines[n(target.dataset.resaleQuantity)].quantity = target.value;
+      updateResalePreview();
+      return;
+    }
+    if (target.matches('[data-resale-price]')) {
+      state.resaleLines[n(target.dataset.resalePrice)].saleUnitPrice = target.value;
+      updateResalePreview();
+      return;
+    }
+    if (target.closest('#resaleForm') && ['resellerId', 'payment', 'date', 'dueDate', 'paidNow'].includes(target.name)) {
+      state.resaleDraft = resaleDraftFromForm();
+      if (target.name === 'resellerId') {
+        state.resaleLines.forEach(line => { if (line.productId) line.saleUnitPrice = suggestedResalePrice(line.productId, state.resaleDraft.resellerId); });
+        render({ preserveScroll: true });
+      }
+      return;
+    }
     if (target.matches('[data-order-product]')) {
       state.orderLines[n(target.dataset.orderProduct)].productId = target.value;
       updateOrderPreview();
@@ -3111,6 +3460,15 @@
   });
   document.addEventListener('input', event => {
     const target = event.target;
+    if (target.matches('[data-resale-quantity]')) {
+      state.resaleLines[n(target.dataset.resaleQuantity)].quantity = target.value;
+      updateResalePreview();
+    }
+    if (target.matches('[data-resale-price]')) {
+      state.resaleLines[n(target.dataset.resalePrice)].saleUnitPrice = target.value;
+      updateResalePreview();
+    }
+    if (target.closest('#resaleForm') && ['note'].includes(target.name)) state.resaleDraft = resaleDraftFromForm();
     if (target.matches('[data-order-quantity]')) {
       state.orderLines[n(target.dataset.orderQuantity)].quantity = target.value;
       updateOrderPreview();
@@ -3130,6 +3488,8 @@
     else if (formId === 'teamMemberForm') saveTeamMember(form);
     else if (formId === 'orderForm') submitOrder(form, false);
     else if (formId === 'orderEditForm') submitOrder(form, true);
+    else if (formId === 'resellerForm') saveReseller(form);
+    else if (formId === 'resaleForm') submitResale(form);
     else if (formId === 'purchaseForm') savePurchase(form);
     else if (formId === 'supplyEditForm') saveSupplyEdit(form);
     else if (formId === 'readyEditForm') saveReadyEdit(form);
@@ -3175,14 +3535,14 @@
   });
   window.addEventListener('focus', () => refreshFromCloud(true));
   window.addEventListener('online', () => {
-    if (cloudDirty) retryCloudSave();
-    refreshFromCloud(true);
+    if (cloudRevision === null || cloudDirty) retryCloudSave();
+    else refreshFromCloud(true);
   });
   if ('serviceWorker' in navigator) window.addEventListener('load', () => {
     const updateButton = $('#appUpdate');
     const showUpdate = () => { if (updateButton) updateButton.hidden = false; };
     updateButton?.addEventListener('click', () => location.reload());
-    navigator.serviceWorker.register('./service-worker.js?v=44').then(registration => {
+    navigator.serviceWorker.register('./service-worker.js?v=45').then(registration => {
       // Solicita a checagem mesmo em quem abre o atalho instalado há semanas.
       registration.update().catch(() => {});
       if (registration.waiting) showUpdate();

@@ -28,7 +28,7 @@
     const type = productType(value);
     return type === 'Água' ? 'agua' : type === 'Leite' ? 'leite' : 'gourmet';
   };
-  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=44';
+  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=45';
   const openedFromManagement = () => new URLSearchParams(location.search).get('gestao') === '1';
   const ORDER_ATTEMPT_KEY = 'gelatos-lele-customer-order-attempt-v1';
   const CUSTOMER_CLIENT_KEY = 'gelatos-lele-customer-client-v1';
@@ -64,7 +64,13 @@
   function start(nextCatalog, preserveDraft = false) {
     const previousQuantities = quantities;
     catalog = nextCatalog;
-    quantities = Object.fromEntries(catalog.products.map(product => [product.id, preserveDraft ? num(previousQuantities[product.id]) : 0]));
+    quantities = Object.fromEntries(catalog.products.map(product => {
+      const previous = preserveDraft ? num(previousQuantities[product.id]) : 0;
+      // Ao atualizar o catálogo, não deixamos no carrinho uma quantidade que
+      // outro cliente já reservou. Encomendas continuam sem esse teto porque
+      // elas podem entrar na programação de produção.
+      return [product.id, isScheduled() ? previous : Math.min(previous, availability(product))];
+    }));
     const modes = availableModes();
     if (!preserveDraft) {
       draft = { customer: '', phone: '', mode: modes[0] || 'Retirada', zoneId: deliveryZones()[0]?.id || '', address: '', payment: 'Pix', orderKind: 'ready', scheduledFor: scheduledMinDate() };
@@ -224,7 +230,7 @@
     const logo = String(catalog.logo || 'logo-transparente-v2.png').trim();
     root.innerHTML = '<section class="hero">' + managementBack() + '<img class="catalog-logo" src="' + esc(logo) + '" alt="' + esc(catalog.brand || 'Gelatos Lele') + '"><h1 class="catalog-brand-name">' + esc(catalog.brand || 'Gelatos Lele') + '</h1><p>' + esc(catalog.intro || 'Confira os sabores disponíveis.') + '</p></section>' +
       (catalog.address ? '<section class="notice"><b>Informações:</b><br>' + esc(catalog.address).replace(/\n/g, '<br>') + '</section>' : '') +
-      fulfillmentChooser() + '<section class="products"><div class="catalog-heading"><h2>' + (isScheduled() ? 'Cardápio para encomenda' : 'Cardápio pronta entrega') + '</h2><span>' + (isScheduled() ? 'Escolha sabores para a data desejada. A produção será confirmada pela Gelatos Lele.' : 'Escolha por tipo e toque em um sabor para informar a quantidade.') + '</span></div>' + products + '</section>' +
+      fulfillmentChooser() + '<section class="products"><div class="catalog-heading"><div><h2>' + (isScheduled() ? 'Cardápio para encomenda' : 'Cardápio pronta entrega') + '</h2><span>' + (isScheduled() ? 'Escolha sabores para a data desejada. A produção será confirmada pela Gelatos Lele.' : 'Escolha por tipo e toque em um sabor para informar a quantidade.') + '</span></div><button type="button" class="catalog-refresh" data-action="refresh-catalog">Atualizar disponibilidade</button></div>' + products + '</section>' +
       (reviewing ? reviewForm(result) : orderForm(result, zones, modes));
   }
   function confirmation(result) {
@@ -285,6 +291,11 @@
       // O histórico pode apontar para WhatsApp, uma busca ou uma aba fechada.
       // A área de gestão tem uma rota fixa, então voltar sempre funciona.
       location.href = managementUrl();
+      return;
+    }
+    if (action === 'refresh-catalog') {
+      syncDraft(document.getElementById('customerOrder'));
+      loadCatalog(true);
       return;
     }
     if (action === 'choose-product') {

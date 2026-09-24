@@ -211,3 +211,27 @@
 .auth-error { margin: -2px 0 0; padding: 11px 12px; border-radius: 12px; background: #fff0f1; color: #9d283d; font-size: 13px; line-height: 1.4; }
 .auth-note { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; text-align: center; }
 .auth-link { justify-self: center; border: 0; padding: 5px; background: transparent; color: var(--pink-dark); font: inherit; font-weight: 800; text-decoration: underline; }
+
+/* Revendas: lote, quantidade e preço ficam na mesma linha em telas grandes,
+   mas se reorganizam em telas pequenas para não cortar campos importantes. */
+.resale-table-title,
+.resale-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(72px, .62fr) minmax(92px, .74fr) 38px;
+  gap: 8px;
+  align-items: center;
+}
+.resale-table-title { margin: 14px 0 6px; padding: 0 4px; color: var(--muted); font-size: 11px; font-weight: 800; }
+.resale-line { margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 13px; background: #fff9fa; }
+.resale-line select,
+.resale-line input { min-width: 0; min-height: 43px; }
+.resale-line .line-remove { min-width: 34px; min-height: 34px; }
+.cloud-boot { min-height: 100dvh; display: grid; place-content: center; gap: 9px; padding: 28px; background: linear-gradient(155deg, #fff8f8 0%, #fbe6ea 100%); color: var(--ink); text-align: center; }
+.cloud-boot strong { font-size: 21px; }
+.cloud-boot span { max-width: 330px; color: var(--muted); line-height: 1.45; }
+@media (max-width: 480px) {
+  .resale-table-title { display: none; }
+  .resale-line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 34px; }
+  .resale-line select { grid-column: 1 / -1; }
+  .resale-line .line-remove { grid-column: 3; }
+}

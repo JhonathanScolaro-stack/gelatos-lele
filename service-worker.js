@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v44-reliable-sync-and-navigation';
+const CACHE = 'gelatos-lele-company-v45-safe-sync-and-catalog-refresh';
 const ASSETS = [
   './',
   './index.html',
