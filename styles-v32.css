@@ -184,3 +184,30 @@
   .manual-order-type > div { grid-template-columns: 1fr; }
   .manual-order-type button { min-height: 62px; }
 }
+
+/* Acesso: sem menu ou distrações antes de a empresa carregar. */
+.auth-shell {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+  background: linear-gradient(155deg, #fff8f8 0%, #fbe6ea 100%);
+}
+.auth-screen { width: min(100%, 410px); }
+.auth-card {
+  display: grid;
+  gap: 24px;
+  padding: 30px 24px 24px;
+  border: 1px solid rgba(102, 49, 45, .12);
+  border-radius: 26px;
+  background: rgba(255, 255, 255, .94);
+  box-shadow: 0 18px 45px rgba(103, 48, 43, .12);
+}
+.auth-logo { display: block; width: min(218px, 72vw); max-height: 112px; margin: 0 auto; object-fit: contain; }
+.auth-form { display: grid; gap: 15px; }
+.auth-form h1 { margin: 0 0 4px; color: var(--ink); font-size: 24px; text-align: center; }
+.auth-form label { display: grid; gap: 7px; color: var(--ink); font-weight: 750; }
+.auth-form input { width: 100%; min-height: 48px; }
+.auth-error { margin: -2px 0 0; padding: 11px 12px; border-radius: 12px; background: #fff0f1; color: #9d283d; font-size: 13px; line-height: 1.4; }
+.auth-note { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; text-align: center; }
+.auth-link { justify-self: center; border: 0; padding: 5px; background: transparent; color: var(--pink-dark); font: inherit; font-weight: 800; text-decoration: underline; }

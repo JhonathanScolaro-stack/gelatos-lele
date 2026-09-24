@@ -349,12 +349,18 @@
     compareSupply: '',
     comparePrice: '',
     compareQuantity: '',
+    cloudAuthView: 'signin',
+    cloudAuthEmail: '',
+    cloudAuthError: '',
     reportFilter: { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '' },
     reportRanking: ''
   };
   // Cada endereço (Netlify, GitHub Pages etc.) possui seu próprio armazenamento do navegador.
   // Ao abrir o app em um endereço novo, encaminhe para a entrada em vez de exibir um painel vazio.
-  if (window.GelatosCloud && !window.GelatosCloud.hasSession()) state.screen = 'settings-cloud';
+  if (window.GelatosCloud?.isPasswordRecovery?.()) {
+    state.screen = 'settings-cloud';
+    state.cloudAuthView = 'update-password';
+  } else if (window.GelatosCloud && !window.GelatosCloud.hasSession()) state.screen = 'settings-cloud';
   function saveLocal() { localStorage.setItem(STORE, JSON.stringify(data)); }
   const cloneData = value => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
   const sameData = (left, right) => JSON.stringify(left) === JSON.stringify(right);
@@ -477,6 +483,8 @@
     if (cloudPolling || cloudRevision === null || !window.GelatosCloud?.hasSession() || document.hidden) return;
     cloudPolling = true;
     try {
+      const revision = await window.GelatosCloud.getRevision();
+      if (Number(revision.revision) <= Number(cloudRevision)) return;
       const latest = await window.GelatosCloud.getState();
       if (Number(latest.revision) > Number(cloudRevision)) {
         if (cloudDirty) {
@@ -721,6 +729,8 @@
     return '<section class="nav-group ' + (open ? 'open' : '') + '"><button class="nav-heading" data-menu="' + group + '">' + esc(label) + '<span>⌄</span></button><div class="nav-children">' + children.map(child => '<button data-route="' + child[1] + '">' + esc(child[0]) + '</button>').join('') + '</div></section>';
   }
   function shell() {
+    const needsAuth = state.screen === 'settings-cloud' && (!window.GelatosCloud?.hasSession() || window.GelatosCloud?.isPasswordRecovery?.());
+    if (needsAuth) return '<div class="auth-shell">' + settingsScreen() + '</div><div id="toast" role="status" aria-live="polite"></div>';
     const unread = data.notifications.filter(item => !item.read).length;
     return '<div class="app-shell"><header class="topbar"><button class="icon-button" data-action="open-menu" aria-label="Abrir menu">☰</button><img class="brand" src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="bell-button" data-action="open-notices" aria-label="Notificações">🔔' + (unread ? '<b>' + unread + '</b>' : '') + '</button><button id="installCta" class="install-cta" hidden>Instalar</button></header><div class="drawer-shade" data-action="close-menu"></div><aside class="drawer"><div class="drawer-brand"><img src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="icon-button" data-action="close-menu" aria-label="Fechar menu">×</button></div><nav><button class="nav-home" data-route="home">Tela inicial</button>' +
       navGroup('Controle de pedidos', 'orders', [['Novo pedido', 'orders:new'], ['Pedidos realizados', 'orders:history']]) +
@@ -1562,7 +1572,18 @@
     if (section === 'cloud') {
       const signedIn = window.GelatosCloud?.hasSession();
       const synced = cloudRevision !== null;
-      if (!signedIn) return '<section class="screen active">' + heading('Bem-vinda de volta', 'Entre para carregar sua empresa', 'Como este é um novo endereço do aplicativo, entre uma vez com o mesmo acesso usado anteriormente. Seus pedidos, estoque e financeiro continuam guardados na nuvem.') + '<form id="cloudAuthForm" class="panel form-panel"><h2>Acesso da Gelatos Lele</h2>' + field('E-mail usado no Gelatos Lele', '<input name="email" type="email" autocomplete="email" required placeholder="voce@exemplo.com">') + field('Senha do Gelatos Lele', '<input name="password" type="password" autocomplete="current-password" minlength="8" required>', 'Use a senha criada para entrar no Gelatos Lele. Não é a senha do GitHub ou do banco de dados.') + '<div class="button-row"><button class="primary" name="cloudMode" value="signin">Carregar minha empresa</button><button class="outline" name="cloudMode" value="signup">Criar acesso novo</button></div><p class="form-note">Use “Criar acesso novo” somente se sua empresa ainda não tinha sincronização. Após entrar, os dados cadastrados voltarão automaticamente.</p></form></section>';
+      const authError = state.cloudAuthError ? '<p class="auth-error" role="alert">' + esc(state.cloudAuthError) + '</p>' : '';
+      const authLogo = '<img class="auth-logo" src="' + esc(homeLogo()) + '" alt="Gelatos Lele">';
+      if (window.GelatosCloud?.isPasswordRecovery?.() || state.cloudAuthView === 'update-password') {
+        return '<section class="auth-screen"><div class="auth-card">' + authLogo + '<form id="cloudPasswordUpdateForm" class="auth-form"><h1>Nova senha</h1><label>Nova senha<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><label>Confirmar nova senha<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label>' + authError + '<button class="primary full">Salvar nova senha</button></form></div></section>';
+      }
+      if (!signedIn && state.cloudAuthView === 'reset') {
+        return '<section class="auth-screen"><div class="auth-card">' + authLogo + '<form id="cloudPasswordResetForm" class="auth-form"><h1>Redefinir senha</h1><label>E-mail<input name="email" type="email" autocomplete="email" required value="' + esc(state.cloudAuthEmail) + '" placeholder="voce@exemplo.com"></label>' + authError + '<button class="primary full">Enviar link</button><button class="auth-link" type="button" data-action="cloud-auth-signin">Voltar para entrar</button></form></div></section>';
+      }
+      if (!signedIn && state.cloudAuthView === 'reset-sent') {
+        return '<section class="auth-screen"><div class="auth-card">' + authLogo + '<div class="auth-form"><h1>Confira seu e-mail</h1><p class="auth-note">Se este e-mail estiver cadastrado, enviamos um link para redefinir a senha.</p><button class="primary full" type="button" data-action="cloud-auth-signin">Voltar para entrar</button></div></div></section>';
+      }
+      if (!signedIn) return '<section class="auth-screen"><div class="auth-card">' + authLogo + '<form id="cloudAuthForm" class="auth-form"><h1>Entrar</h1><label>E-mail<input name="email" type="email" autocomplete="email" required value="' + esc(state.cloudAuthEmail) + '" placeholder="voce@exemplo.com"></label><label>Senha<input name="password" type="password" autocomplete="current-password" minlength="8" required></label>' + authError + '<button class="primary full">Entrar</button><button class="auth-link" type="button" data-action="cloud-auth-reset">Esqueci minha senha</button></form></div></section>';
       return '<section class="screen active">' + heading('Configurações', 'Nuvem e sincronização', synced ? 'Sua empresa está sincronizada. Alterações feitas em um celular aparecem no outro.' : 'Ative a empresa e envie os dados deste celular uma única vez.') + '<section class="panel"><h2>Acesso conectado</h2><p>' + esc(window.GelatosCloud.email() || 'E-mail conectado') + '</p><span class="badge ' + (synced ? 'paid' : 'pending') + '">' + (synced ? 'sincronizado' : 'aguardando ativação') + '</span></section>' + (synced ? '<section class="panel"><p>Os dados ficam neste celular e na nuvem. Quando houver internet, alterações e pedidos do cardápio são atualizados automaticamente.</p><div class="button-row"><button class="secondary" data-action="cloud-refresh">Atualizar agora</button><button class="outline" data-action="cloud-signout">Sair deste celular</button></div></section>' : '<form id="cloudActivateForm" class="panel form-panel"><h2>Ativar e migrar os dados</h2>' + field('Código de ativação', '<input name="activationCode" required autocomplete="off" placeholder="Código recebido no atendimento">', 'Use o código único fornecido para esta primeira ativação. Depois dele, só quem entrar com seu e-mail e senha terá acesso.') + '<button class="primary full">Ativar empresa e enviar dados deste celular</button><p class="form-note">Faça isto no celular que já tem os cadastros corretos. Os dados atuais não serão apagados.</p></form>') + '</section>';
     }
     if (section === 'team') {
@@ -1658,7 +1679,7 @@
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=42';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=43';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -2637,19 +2658,21 @@
       navigator.clipboard.writeText(link).then(() => toast('Link do cardápio copiado.')).catch(() => prompt('Copie este link para enviar ao cliente:', link));
     } else prompt('Copie este link para enviar ao cliente:', link);
   }
-  async function authenticateCloud(form, mode) {
+  function cloudAuthMessage(error) {
+    const text = String(error?.message || '');
+    if (window.GelatosCloud?.isConnectionError?.(error)) return 'A sincronização não está disponível agora. Sua senha não foi validada e nenhum dado foi alterado. Tente novamente mais tarde.';
+    if (/invalid login credentials/i.test(text)) return 'E-mail ou senha não conferem. Confira e tente novamente.';
+    if (/email not confirmed/i.test(text)) return 'Confirme o e-mail deste acesso antes de entrar.';
+    return text || 'Não foi possível entrar agora. Tente novamente.';
+  }
+  async function authenticateCloud(form) {
     const email = String(form.elements.email.value || '').trim();
     const password = String(form.elements.password.value || '');
-    if (!email || password.length < 8) { toast('Informe seu e-mail e uma senha com pelo menos 8 caracteres.'); return; }
+    state.cloudAuthEmail = email;
+    state.cloudAuthError = '';
+    if (!email || password.length < 8) { state.cloudAuthError = 'Informe seu e-mail e uma senha com pelo menos 8 caracteres.'; render({ preserveScroll: true }); return; }
     try {
-      if (mode === 'signup') {
-        const result = await window.GelatosCloud.signUp(email, password);
-        if (!result?.access_token) { toast('Acesse o e-mail de confirmação e depois volte aqui para entrar.'); return; }
-        toast('Acesso criado. Agora ative a empresa.');
-      } else {
-        await window.GelatosCloud.signIn(email, password);
-        toast('Acesso conectado.');
-      }
+      await window.GelatosCloud.signIn(email, password);
       try {
         const remote = await window.GelatosCloud.getState();
         data = normalize(remote.state);
@@ -2659,8 +2682,39 @@
         saveLocal();
         toast('Dados da empresa carregados da nuvem.');
         navigate('home');
-      } catch (_) { navigate('settings:cloud'); }
-    } catch (error) { toast(error.message || 'Não foi possível entrar na nuvem.'); }
+      } catch (error) {
+        window.GelatosCloud.signOut();
+        cloudRevision = null;
+        state.cloudAuthError = cloudAuthMessage(error);
+        render({ preserveScroll: true });
+      }
+    } catch (error) { state.cloudAuthError = cloudAuthMessage(error); render({ preserveScroll: true }); }
+  }
+  async function requestCloudPasswordReset(form) {
+    const email = String(form.elements.email.value || '').trim();
+    state.cloudAuthEmail = email;
+    state.cloudAuthError = '';
+    if (!email) { state.cloudAuthError = 'Informe o e-mail usado para entrar.'; render({ preserveScroll: true }); return; }
+    try {
+      await window.GelatosCloud.resetPassword(email);
+      state.cloudAuthView = 'reset-sent';
+      render({ preserveScroll: true });
+    } catch (error) { state.cloudAuthError = cloudAuthMessage(error); render({ preserveScroll: true }); }
+  }
+  async function updateCloudPassword(form) {
+    const password = String(form.elements.password.value || '');
+    const confirmation = String(form.elements.confirmPassword.value || '');
+    state.cloudAuthError = '';
+    if (password.length < 8) { state.cloudAuthError = 'Use uma senha com pelo menos 8 caracteres.'; render({ preserveScroll: true }); return; }
+    if (password !== confirmation) { state.cloudAuthError = 'As duas senhas precisam ser iguais.'; render({ preserveScroll: true }); return; }
+    try {
+      await window.GelatosCloud.updatePassword(password);
+      state.cloudAuthView = 'signin';
+      state.cloudAuthError = '';
+      window.GelatosCloud.signOut();
+      render({ preserveScroll: true });
+      toast('Senha atualizada. Entre com a nova senha.');
+    } catch (error) { state.cloudAuthError = cloudAuthMessage(error); render({ preserveScroll: true }); }
   }
   async function activateCloud(form) {
     const code = String(form.elements.activationCode.value || '').trim();
@@ -2839,6 +2893,8 @@
     const id = actionNode.dataset.id;
     if (action === 'open-menu') { document.body.classList.add('drawer-open'); return; }
     if (action === 'close-menu') { document.body.classList.remove('drawer-open'); return; }
+    if (action === 'cloud-auth-reset') { state.cloudAuthView = 'reset'; state.cloudAuthError = ''; render({ preserveScroll: true }); return; }
+    if (action === 'cloud-auth-signin') { state.cloudAuthView = 'signin'; state.cloudAuthError = ''; render({ preserveScroll: true }); return; }
     if (action === 'open-notices') { state.notices = true; render(); return; }
     if (action === 'close-notices') { state.notices = false; render(); return; }
     if (action === 'read-notices') { data.notifications.forEach(item => item.read = true); save(); render(); return; }
@@ -3011,7 +3067,9 @@
     event.preventDefault();
     const form = event.target;
     const formId = form.getAttribute('id');
-    if (formId === 'cloudAuthForm') authenticateCloud(form, event.submitter?.value || 'signin');
+    if (formId === 'cloudAuthForm') authenticateCloud(form);
+    else if (formId === 'cloudPasswordResetForm') requestCloudPasswordReset(form);
+    else if (formId === 'cloudPasswordUpdateForm') updateCloudPassword(form);
     else if (formId === 'cloudActivateForm') activateCloud(form);
     else if (formId === 'teamMemberForm') saveTeamMember(form);
     else if (formId === 'orderForm') submitOrder(form, false);
@@ -3052,7 +3110,9 @@
   $('#app').innerHTML = '<div class="boot">Carregando Gelatos Lele…</div>';
   render();
   loadCloudOnStart();
-  setInterval(() => refreshFromCloud(true), 4000);
+  // Consulta só a revisão a cada 30 segundos; os dados completos são baixados
+  // apenas quando algo muda. Isso preserva a franquia de sincronização.
+  setInterval(() => refreshFromCloud(true), 30000);
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) refreshFromCloud(true);
   });
@@ -3060,7 +3120,7 @@
     const updateButton = $('#appUpdate');
     const showUpdate = () => { if (updateButton) updateButton.hidden = false; };
     updateButton?.addEventListener('click', () => location.reload());
-    navigator.serviceWorker.register('./service-worker.js?v=42').then(registration => {
+    navigator.serviceWorker.register('./service-worker.js?v=43').then(registration => {
       // Solicita a checagem mesmo em quem abre o atalho instalado há semanas.
       registration.update().catch(() => {});
       if (registration.waiting) showUpdate();

@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v42-partial-scheduled-reservations';
+const CACHE = 'gelatos-lele-company-v43-auth-and-efficient-sync';
 const ASSETS = [
   './',
   './index.html',
@@ -43,7 +43,7 @@ self.addEventListener('fetch', event => {
     }).catch(() => caches.match(fallback)));
     return;
   }
-  // Os arquivos usam ?v=42 para atualização. Ignorar só essa consulta mantém
+  // Os arquivos usam ?v=43 para atualização. Ignorar só essa consulta mantém
   // o app funcional offline com o mesmo arquivo que foi pré-armazenado.
   event.respondWith(caches.match(event.request, { ignoreSearch: true }).then(cached => cached || fetch(event.request).then(response => {
     const copy = response.clone();

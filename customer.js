@@ -28,7 +28,7 @@
     const type = productType(value);
     return type === 'Água' ? 'agua' : type === 'Leite' ? 'leite' : 'gourmet';
   };
-  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=42';
+  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=43';
   const ORDER_ATTEMPT_KEY = 'gelatos-lele-customer-order-attempt-v1';
   const CUSTOMER_CLIENT_KEY = 'gelatos-lele-customer-client-v1';
   const newAttemptId = () => (window.crypto?.randomUUID?.() || (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2)));
