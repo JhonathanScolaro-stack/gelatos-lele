@@ -28,7 +28,8 @@
     const type = productType(value);
     return type === 'Água' ? 'agua' : type === 'Leite' ? 'leite' : 'gourmet';
   };
-  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=43';
+  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=44';
+  const openedFromManagement = () => new URLSearchParams(location.search).get('gestao') === '1';
   const ORDER_ATTEMPT_KEY = 'gelatos-lele-customer-order-attempt-v1';
   const CUSTOMER_CLIENT_KEY = 'gelatos-lele-customer-client-v1';
   const newAttemptId = () => (window.crypto?.randomUUID?.() || (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2)));
@@ -40,7 +41,7 @@
     }
     return value;
   };
-  const managementBack = () => window.GelatosCloud?.hasSession?.()
+  const managementBack = () => (openedFromManagement() || window.GelatosCloud?.hasSession?.())
     ? '<button type="button" class="back-app" data-action="back-customer">← Gestão</button>'
     : '';
 
@@ -281,7 +282,9 @@
   document.addEventListener('click', event => {
     const action = event.target.closest('[data-action]')?.dataset.action;
     if (action === 'back-customer') {
-      if (history.length > 1) history.back(); else location.href = managementUrl();
+      // O histórico pode apontar para WhatsApp, uma busca ou uma aba fechada.
+      // A área de gestão tem uma rota fixa, então voltar sempre funciona.
+      location.href = managementUrl();
       return;
     }
     if (action === 'choose-product') {

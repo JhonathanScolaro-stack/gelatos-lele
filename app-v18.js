@@ -321,6 +321,12 @@
   let cloudSyncTimer = null;
   let cloudSaving = false;
   let cloudPolling = false;
+  // A confirmação e a falha mais recentes deixam claro se um aparelho está
+  // falando com a nuvem. Antes, uma queda temporária podia deixar a alteração
+  // só neste celular, sem uma nova tentativa automática.
+  let cloudLastSuccessAt = '';
+  let cloudLastError = '';
+  let cloudRetryDelay = 5000;
   let orderSubmitting = false;
   let deferredInstall = null;
   const state = {
@@ -440,6 +446,23 @@
     return { merged, conflicts };
   }
   let cloudDirty = false;
+  function cloudSaved() {
+    cloudLastSuccessAt = new Date().toISOString();
+    cloudLastError = '';
+    cloudRetryDelay = 5000;
+  }
+  function cloudFailed(error) {
+    cloudLastError = window.GelatosCloud?.isConnectionError?.(error)
+      ? 'A nuvem está indisponível neste momento. A alteração ficou guardada neste celular e será tentada novamente.'
+      : 'Não foi possível confirmar a sincronização agora. A alteração ficou guardada neste celular e será tentada novamente.';
+  }
+  function retryCloudSave() {
+    if (!cloudDirty || cloudRevision === null || !window.GelatosCloud?.hasSession()) return;
+    clearTimeout(cloudSyncTimer);
+    const delay = cloudRetryDelay;
+    cloudRetryDelay = Math.min(cloudRetryDelay * 2, 300000);
+    cloudSyncTimer = setTimeout(() => syncCloudNow(true), delay);
+  }
   async function syncCloudNow(silent = false) {
     if (cloudSaving || cloudRevision === null || !window.GelatosCloud?.hasSession()) return;
     cloudSaving = true;
@@ -449,6 +472,7 @@
       cloudRevision = Number(saved.revision);
       cloudBaseData = cloneData(sent);
       cloudDirty = !sameData(data, sent);
+      cloudSaved();
       if (cloudDirty) queueCloudSave();
       if (!silent) toast('Alterações salvas na nuvem.');
     } catch (error) {
@@ -463,14 +487,23 @@
           cloudRevision = Number(saved.revision);
           cloudBaseData = cloneData(mergedSnapshot);
           cloudDirty = !sameData(data, mergedSnapshot);
+          cloudSaved();
           saveLocal();
           render();
           if (cloudDirty) queueCloudSave();
           toast(reconciliation.conflicts.length ? 'Dados conciliados. Há um aviso para revisar campos alterados nos dois celulares.' : 'Dados dos dois celulares foram conciliados e salvos.');
-        } catch (_) { toast('Não foi possível atualizar os dados da nuvem agora.'); }
+          return;
+        } catch (innerError) {
+          cloudFailed(innerError);
+          retryCloudSave();
+          toast('Não foi possível atualizar os dados da nuvem agora. A tentativa será refeita automaticamente.');
+          return;
+        }
       } else if (!silent) {
         toast('Alteração guardada neste celular. A nuvem será tentada novamente quando houver internet.');
       }
+      cloudFailed(error);
+      retryCloudSave();
     } finally { cloudSaving = false; }
   }
   function queueCloudSave() {
@@ -484,6 +517,7 @@
     cloudPolling = true;
     try {
       const revision = await window.GelatosCloud.getRevision();
+      cloudSaved();
       if (Number(revision.revision) <= Number(cloudRevision)) return;
       const latest = await window.GelatosCloud.getState();
       if (Number(latest.revision) > Number(cloudRevision)) {
@@ -501,11 +535,15 @@
         data = normalize(latest.state);
         cloudRevision = Number(latest.revision);
         cloudBaseData = cloneData(data);
+        cloudSaved();
         saveLocal();
         render();
         if (!silent) toast('Dados atualizados pela nuvem.');
       }
-    } catch (_) { /* A cópia local continua disponível sem internet. */ }
+    } catch (error) {
+      cloudFailed(error);
+      /* A cópia local continua disponível sem internet. */
+    }
     finally { cloudPolling = false; }
   }
   async function loadCloudOnStart() {
@@ -516,9 +554,11 @@
       cloudRevision = Number(remote.revision);
       cloudBaseData = cloneData(data);
       cloudDirty = false;
+      cloudSaved();
       saveLocal();
       render();
-    } catch (_) {
+    } catch (error) {
+      cloudFailed(error);
       /* Sem internet, o aplicativo continua com a última cópia salva neste celular. */
     }
   }
@@ -540,8 +580,10 @@
         toast('O estoque foi atualizado por um pedido novo. Confira as quantidades e confirme novamente.');
         return false;
       }
+      cloudSaved();
       return true;
-    } catch (_) {
+    } catch (error) {
+      cloudFailed(error);
       toast('Não foi possível conferir o estoque na nuvem. Verifique a internet e tente novamente.');
       return false;
     }
@@ -764,7 +806,7 @@
     const currentMonth = date => new Date(date + 'T12:00:00').getMonth() === now.getMonth() && new Date(date + 'T12:00:00').getFullYear() === now.getFullYear();
     return '<section class="screen active"><div class="welcome"><img src="' + esc(homeLogo()) + '" alt="Gelatos Lele"><span>Visão geral da empresa</span></div><div class="dashboard-grid">' +
       metric('Geladinhos prontos', 'dashReady', 'Estoque disponível', 'stock:ready', true) +
-      metric('Pedidos de hoje', 'dashOrders', 'Pedidos criados hoje', 'reports:orders:today') +
+      metric('Pedidos de hoje', 'dashOrders', 'Pedidos criados hoje', 'orders:history') +
       metric('Recebido hoje', 'dashToday', 'Somente pedidos pagos', 'reports:finance:today') +
       metric('Faturamento do mês', 'dashMonth', 'Pedidos pagos no mês', 'reports:finance:month') +
       metric('Faturamento do ano', 'dashYear', 'Pedidos pagos no ano', 'reports:finance:year') +
@@ -1584,7 +1626,12 @@
         return '<section class="auth-screen"><div class="auth-card">' + authLogo + '<div class="auth-form"><h1>Confira seu e-mail</h1><p class="auth-note">Se este e-mail estiver cadastrado, enviamos um link para redefinir a senha.</p><button class="primary full" type="button" data-action="cloud-auth-signin">Voltar para entrar</button></div></div></section>';
       }
       if (!signedIn) return '<section class="auth-screen"><div class="auth-card">' + authLogo + '<form id="cloudAuthForm" class="auth-form"><h1>Entrar</h1><label>E-mail<input name="email" type="email" autocomplete="email" required value="' + esc(state.cloudAuthEmail) + '" placeholder="voce@exemplo.com"></label><label>Senha<input name="password" type="password" autocomplete="current-password" minlength="8" required></label>' + authError + '<button class="primary full">Entrar</button><button class="auth-link" type="button" data-action="cloud-auth-reset">Esqueci minha senha</button></form></div></section>';
-      return '<section class="screen active">' + heading('Configurações', 'Nuvem e sincronização', synced ? 'Sua empresa está sincronizada. Alterações feitas em um celular aparecem no outro.' : 'Ative a empresa e envie os dados deste celular uma única vez.') + '<section class="panel"><h2>Acesso conectado</h2><p>' + esc(window.GelatosCloud.email() || 'E-mail conectado') + '</p><span class="badge ' + (synced ? 'paid' : 'pending') + '">' + (synced ? 'sincronizado' : 'aguardando ativação') + '</span></section>' + (synced ? '<section class="panel"><p>Os dados ficam neste celular e na nuvem. Quando houver internet, alterações e pedidos do cardápio são atualizados automaticamente.</p><div class="button-row"><button class="secondary" data-action="cloud-refresh">Atualizar agora</button><button class="outline" data-action="cloud-signout">Sair deste celular</button></div></section>' : '<form id="cloudActivateForm" class="panel form-panel"><h2>Ativar e migrar os dados</h2>' + field('Código de ativação', '<input name="activationCode" required autocomplete="off" placeholder="Código recebido no atendimento">', 'Use o código único fornecido para esta primeira ativação. Depois dele, só quem entrar com seu e-mail e senha terá acesso.') + '<button class="primary full">Ativar empresa e enviar dados deste celular</button><p class="form-note">Faça isto no celular que já tem os cadastros corretos. Os dados atuais não serão apagados.</p></form>') + '</section>';
+      const cloudStatus = cloudLastError
+        ? '<p class="form-note">' + esc(cloudLastError) + '</p>'
+        : cloudLastSuccessAt
+          ? '<p class="form-note">Última confirmação da nuvem: ' + esc(brDateTime(cloudLastSuccessAt)) + '.</p>'
+          : '<p class="form-note">Conferindo a nuvem…</p>';
+      return '<section class="screen active">' + heading('Configurações', 'Nuvem e sincronização', synced ? 'Sua empresa está sincronizada. Alterações feitas em um celular aparecem no outro.' : 'Ative a empresa e envie os dados deste celular uma única vez.') + '<section class="panel"><h2>Acesso conectado</h2><p>' + esc(window.GelatosCloud.email() || 'E-mail conectado') + '</p><span class="badge ' + (synced ? 'paid' : 'pending') + '">' + (synced ? 'sincronizado' : 'aguardando ativação') + '</span>' + cloudStatus + '</section>' + (synced ? '<section class="panel"><p>Alterações deste celular são guardadas localmente e enviadas automaticamente. Quando o outro celular estiver aberto, ele confere a nuvem em até 20 segundos; “Atualizar agora” faz isso imediatamente.</p><div class="button-row"><button class="secondary" data-action="cloud-refresh">Atualizar agora</button><button class="outline" data-action="cloud-signout">Sair deste celular</button></div></section>' : '<form id="cloudActivateForm" class="panel form-panel"><h2>Ativar e migrar os dados</h2>' + field('Código de ativação', '<input name="activationCode" required autocomplete="off" placeholder="Código recebido no atendimento">', 'Use o código único fornecido para esta primeira ativação. Depois dele, só quem entrar com seu e-mail e senha terá acesso.') + '<button class="primary full">Ativar empresa e enviar dados deste celular</button><p class="form-note">Faça isto no celular que já tem os cadastros corretos. Os dados atuais não serão apagados.</p></form>') + '</section>';
     }
     if (section === 'team') {
       const members = Array.isArray(state.teamMembers) ? state.teamMembers : [];
@@ -1615,7 +1662,7 @@
         field('WhatsApp da empresa', '<input name="catalogPhone" inputmode="tel" value="' + esc(data.settings.catalogPhone || '') + '">', 'É usado se o celular não tiver a opção de compartilhar disponível.') +
         field('Endereço / instruções', '<textarea name="businessAddress" rows="3">' + esc(data.settings.businessAddress || '') + '</textarea>', 'Ex.: retirada no endereço, horário ou taxa de entrega.') +
         '<section class="panel nested-panel"><h2>Encomendas agendadas</h2><p class="form-note">Ao receber uma encomenda, o sistema separa imediatamente os sabores que já existem no estoque. Só o saldo que falta entra na produção pendente.</p><label class="catalog-switch"><input name="scheduledEnabled" type="checkbox"' + (data.settings.scheduledEnabled !== false ? ' checked' : '') + '> Permitir encomendas no cardápio</label><div class="form-grid two">' + field('Prazo mínimo (dias)', '<input name="scheduledLeadDays" inputmode="numeric" value="' + esc(data.settings.scheduledLeadDays || '2') + '" placeholder="Ex.: 2">', 'O cliente só poderá escolher datas a partir deste número de dias. O mínimo do sistema é 2 dias.') + field('Limite por data (geladinhos)', '<input name="scheduledMaxItemsPerDay" inputmode="decimal" value="' + esc(data.settings.scheduledMaxItemsPerDay || '') + '" placeholder="Deixe em branco para não limitar">', 'Evita aceitar mais encomendas do que a produção comporta em um mesmo dia. Conta apenas o que ainda precisa ser produzido para a data.') + '</div></section>' +
-        '<button class="primary full">Salvar informações do cardápio</button></form><section class="panel"><h2>Link para enviar ao cliente</h2><p>Pronta entrega mostra somente o que já foi produzido. Encomenda mostra os sabores ativos, pede uma data com o prazo mínimo e já separa o estoque que estiver pronto.</p><div class="customer-link"><input readonly value="' + esc(link) + '"><button class="secondary" type="button" data-action="copy-catalog-link">Copiar link</button></div><p class="form-note">Com a nuvem ativada, os pedidos entram diretamente no Controle de pedidos.</p></section></section>';
+        '<button class="primary full">Salvar informações do cardápio</button></form><section class="panel"><h2>Link para enviar ao cliente</h2><p>Pronta entrega mostra somente o que já foi produzido. Encomenda mostra os sabores ativos, pede uma data com o prazo mínimo e já separa o estoque que estiver pronto.</p><div class="customer-link"><input readonly value="' + esc(link) + '"><button class="secondary" type="button" data-action="copy-catalog-link">Copiar link</button></div><div class="button-row"><button class="outline" type="button" data-action="open-catalog-management">Abrir para conferir</button></div><p class="form-note">Use “Abrir para conferir” no celular de gestão: o botão “Voltar à gestão” aparecerá somente nessa abertura. O link copiado continua sendo a versão limpa para o cliente.</p><p class="form-note">Com a nuvem ativada, os pedidos entram diretamente no Controle de pedidos.</p></section></section>';
     }
     if (section === 'delivery') {
       const draft = state.deliveryDraft || (state.deliveryDraft = defaultDeliveryDraft());
@@ -1679,12 +1726,16 @@
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=43';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=44';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
       return 'Salve as configurações antes de gerar o link.';
     }
+  }
+  function managementCatalogLink() {
+    const base = location.origin + location.pathname.replace(/[^/]*$/, '');
+    return base + 'customer.html?v=44&gestao=1';
   }
   function noticesPanel() {
     if (!state.notices) return '';
@@ -2679,6 +2730,7 @@
         cloudRevision = Number(remote.revision);
         cloudBaseData = cloneData(data);
         cloudDirty = false;
+        cloudSaved();
         saveLocal();
         toast('Dados da empresa carregados da nuvem.');
         navigate('home');
@@ -2726,6 +2778,7 @@
       cloudRevision = Number(saved.revision);
       cloudBaseData = cloneData(data);
       cloudDirty = false;
+      cloudSaved();
       saveLocal();
       toast('Empresa ativada e dados enviados para a nuvem.');
       navigate('home');
@@ -2737,6 +2790,7 @@
       if (cloudDirty) {
         data = reconcileCloudState(remote.state).merged;
         cloudRevision = Number(remote.revision);
+        cloudSaved();
         saveLocal();
         render();
         queueCloudSave();
@@ -2746,10 +2800,11 @@
       data = normalize(remote.state);
       cloudRevision = Number(remote.revision);
       cloudBaseData = cloneData(data);
+      cloudSaved();
       saveLocal();
       render();
       toast('Dados atualizados pela nuvem.');
-    } catch (error) { toast(error.message || 'Não foi possível atualizar agora.'); }
+    } catch (error) { cloudFailed(error); toast(error.message || 'Não foi possível atualizar agora.'); }
   }
   async function loadTeamMembers() {
     if (!window.GelatosCloud?.hasSession()) {
@@ -2993,6 +3048,7 @@
     if (action === 'clear-filter') { state.reportFilter = { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '' }; render(); return; }
     if (action === 'export-xlsx') { exportXlsx(); return; }
     if (action === 'copy-catalog-link') { copyCatalogLink(); return; }
+    if (action === 'open-catalog-management') { location.href = managementCatalogLink(); return; }
     if (action === 'cloud-refresh') { forceCloudRefresh(); return; }
     if (action === 'cloud-signout') { clearTimeout(cloudSyncTimer); cloudRevision = null; window.GelatosCloud.signOut(); toast('Este celular saiu da nuvem. Os dados locais foram mantidos.'); navigate('settings:cloud'); return; }
     if (action === 'remove-member') { removeTeamMember(id); return; }
@@ -3110,17 +3166,23 @@
   $('#app').innerHTML = '<div class="boot">Carregando Gelatos Lele…</div>';
   render();
   loadCloudOnStart();
-  // Consulta só a revisão a cada 30 segundos; os dados completos são baixados
-  // apenas quando algo muda. Isso preserva a franquia de sincronização.
-  setInterval(() => refreshFromCloud(true), 30000);
+  // Consulta só a revisão a cada 20 segundos; os dados completos são baixados
+  // apenas quando algo muda. Assim os dois celulares se atualizam depressa sem
+  // ficar baixando fotos e cadastros a cada consulta.
+  setInterval(() => refreshFromCloud(true), 20000);
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) refreshFromCloud(true);
+  });
+  window.addEventListener('focus', () => refreshFromCloud(true));
+  window.addEventListener('online', () => {
+    if (cloudDirty) retryCloudSave();
+    refreshFromCloud(true);
   });
   if ('serviceWorker' in navigator) window.addEventListener('load', () => {
     const updateButton = $('#appUpdate');
     const showUpdate = () => { if (updateButton) updateButton.hidden = false; };
     updateButton?.addEventListener('click', () => location.reload());
-    navigator.serviceWorker.register('./service-worker.js?v=43').then(registration => {
+    navigator.serviceWorker.register('./service-worker.js?v=44').then(registration => {
       // Solicita a checagem mesmo em quem abre o atalho instalado há semanas.
       registration.update().catch(() => {});
       if (registration.waiting) showUpdate();

@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v43-auth-and-efficient-sync';
+const CACHE = 'gelatos-lele-company-v44-reliable-sync-and-navigation';
 const ASSETS = [
   './',
   './index.html',
@@ -43,11 +43,13 @@ self.addEventListener('fetch', event => {
     }).catch(() => caches.match(fallback)));
     return;
   }
-  // Os arquivos usam ?v=43 para atualização. Ignorar só essa consulta mantém
-  // o app funcional offline com o mesmo arquivo que foi pré-armazenado.
-  event.respondWith(caches.match(event.request, { ignoreSearch: true }).then(cached => cached || fetch(event.request).then(response => {
+  // Arquivos versionados precisam respeitar a versão. Assim a próxima versão
+  // do app não recebe um JavaScript antigo apenas porque tem o mesmo nome.
+  // Para arquivos sem versão, a cópia pré-armazenada continua disponível offline.
+  const matchOptions = url.searchParams.has('v') ? undefined : { ignoreSearch: true };
+  event.respondWith(caches.match(event.request, matchOptions).then(cached => cached || fetch(event.request).then(response => {
     const copy = response.clone();
     caches.open(CACHE).then(cache => cache.put(event.request, copy));
     return response;
-  })));
+  }).catch(() => caches.match(event.request, { ignoreSearch: true }))));
 });

@@ -7,8 +7,8 @@
   <meta name="description" content="Gestão de receitas, estoque, pedidos, financeiro e relatórios da Gelatos Lele.">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icon-oficial-v2.png">
-  <link rel="stylesheet" href="styles-v18.css?v=43">
-  <link rel="stylesheet" href="styles-v32.css?v=43">
+  <link rel="stylesheet" href="styles-v18.css?v=44">
+  <link rel="stylesheet" href="styles-v32.css?v=44">
   <title>Gelatos Lele — Gestão</title>
 </head>
 <body>
@@ -19,20 +19,20 @@
     // uma versão antiga instalada do app.
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('./service-worker.js?v=43').then(function (registration) {
+        navigator.serviceWorker.register('./service-worker.js?v=44').then(function (registration) {
           registration.update();
           navigator.serviceWorker.addEventListener('controllerchange', function () {
-            if (sessionStorage.getItem('gelatos-app-reloaded-v43')) return;
-            sessionStorage.setItem('gelatos-app-reloaded-v43', '1');
+            if (sessionStorage.getItem('gelatos-app-reloaded-v44')) return;
+            sessionStorage.setItem('gelatos-app-reloaded-v44', '1');
             window.location.reload();
           }, { once: true });
         }).catch(function () {});
       });
     }
   </script>
-  <script src="business-core.js?v=43"></script>
-  <script src="cloud-config.js?v=43"></script>
-  <script src="cloud-sync.js?v=43"></script>
-  <script src="app-v18.js?v=43"></script>
+  <script src="business-core.js?v=44"></script>
+  <script src="cloud-config.js?v=44"></script>
+  <script src="cloud-sync.js?v=44"></script>
+  <script src="app-v18.js?v=44"></script>
 </body>
 </html>
