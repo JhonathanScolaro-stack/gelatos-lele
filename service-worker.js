@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v47-r2-media';
+const CACHE = 'gelatos-lele-company-v49-atomic-production';
 const ASSETS = [
   './',
   './index.html',

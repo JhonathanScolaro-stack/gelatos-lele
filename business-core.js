@@ -5,13 +5,20 @@ window.GelatosCore = (() => {
   const qty = value => Math.round((Number(value) + Number.EPSILON) * 1000) / 1000;
   const money = value => round(value || 0);
   const total = lines => money(lines.reduce((sum, line) => sum + money(line.total), 0));
+  // Cada medida tem uma forma canônica. As variações comuns digitadas no
+  // celular são aceitas, mas pacote, caixa e rolo NÃO são equivalentes: uma
+  // caixa pode conter uma quantidade completamente diferente de um pacote.
   const UNIT = {
-    ml: { group: 'volume', factor: 1 }, l: { group: 'volume', factor: 1000 },
-    g: { group: 'mass', factor: 1 }, kg: { group: 'mass', factor: 1000 },
-    'un.': { group: 'count', factor: 1 }, un: { group: 'count', factor: 1 },
-    pacote: { group: 'package', factor: 1 }, caixa: { group: 'package', factor: 1 }, rolo: { group: 'package', factor: 1 }
+    ml: { group: 'volume', factor: 1 }, mililitro: { group: 'volume', factor: 1 }, mililitros: { group: 'volume', factor: 1 },
+    l: { group: 'volume', factor: 1000 }, litro: { group: 'volume', factor: 1000 }, litros: { group: 'volume', factor: 1000 },
+    g: { group: 'mass', factor: 1 }, grama: { group: 'mass', factor: 1 }, gramas: { group: 'mass', factor: 1 },
+    kg: { group: 'mass', factor: 1000 }, quilo: { group: 'mass', factor: 1000 }, quilos: { group: 'mass', factor: 1000 },
+    un: { group: 'count', factor: 1 }, unidade: { group: 'count', factor: 1 }, unidades: { group: 'count', factor: 1 }, und: { group: 'count', factor: 1 }, unds: { group: 'count', factor: 1 },
+    pacote: { group: 'package:pacote', factor: 1 }, pacotes: { group: 'package:pacote', factor: 1 },
+    caixa: { group: 'package:caixa', factor: 1 }, caixas: { group: 'package:caixa', factor: 1 }, cx: { group: 'package:caixa', factor: 1 },
+    rolo: { group: 'package:rolo', factor: 1 }, rolos: { group: 'package:rolo', factor: 1 }
   };
-  const unitKey = unit => String(unit || '').trim().toLocaleLowerCase('pt-BR');
+  const unitKey = unit => String(unit || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLocaleLowerCase('pt-BR').replace(/[.\s]+/g, '');
   function convertQuantity(quantity, fromUnit, toUnit) {
     const from = UNIT[unitKey(fromUnit)];
     const to = UNIT[unitKey(toUnit)];
@@ -70,16 +77,44 @@ window.GelatosCore = (() => {
       grouped[supplyId] = previous;
       return grouped;
     }, {}));
+    const shortages = [];
     consumed.forEach(line => {
       const available = Number(suppliesById[line.supplyId].quantity);
-      if (available < line.quantity) throw new Error('Estoque insuficiente para produzir.');
+      line.available = qty(available);
+      line.name = String(suppliesById[line.supplyId].name || 'Item');
+      line.unit = String(suppliesById[line.supplyId].unit || 'un.');
+      if (available + 0.0000001 < line.quantity) shortages.push({ ...line, missing: qty(line.quantity - available) });
     });
+    if (shortages.length) {
+      const detail = shortages.map(line => line.name + ': precisa ' + line.quantity + ' ' + line.unit + ', disponível ' + line.available + ' ' + line.unit + ', faltam ' + line.missing + ' ' + line.unit).join(' · ');
+      const error = new Error('Estoque insuficiente para produzir. ' + detail);
+      error.code = 'ESTOQUE_INSUFICIENTE';
+      error.shortages = shortages;
+      throw error;
+    }
     return {
       consumed,
       outputQuantity: qty(Number(recipe.yieldUnits) * numberOfBatches),
       totalCost: money(costing.batchCost * numberOfBatches),
       unitCost: costing.unitCost,
     };
+  }
+
+  function productionCapacity(recipe, suppliesById) {
+    const costing = recipeCost(recipe, suppliesById);
+    const requirements = Object.values(costing.lines.reduce((grouped, line) => {
+      const previous = grouped[line.supplyId] || { supplyId: line.supplyId, quantity: 0 };
+      previous.quantity = qty(previous.quantity + line.quantity);
+      grouped[line.supplyId] = previous;
+      return grouped;
+    }, {})).map(line => {
+      const supply = suppliesById[line.supplyId];
+      const available = qty(Number(supply.quantity || 0));
+      const batches = line.quantity > 0 ? Math.max(0, Math.floor((available + 0.0000001) / line.quantity)) : 0;
+      return { ...line, available, batches, name: String(supply.name || 'Item'), unit: String(supply.unit || 'un.') };
+    });
+    const maxBatches = requirements.length ? Math.max(0, Math.min(...requirements.map(line => line.batches))) : 0;
+    return { maxBatches, requirements, outputQuantity: qty(maxBatches * Number(recipe.yieldUnits || 0)) };
   }
 
   function validateOrder(items, readyById) {
@@ -118,5 +153,5 @@ window.GelatosCore = (() => {
       profit: money(revenue - cost - paymentFees - deliveryCosts - operationalExpense), methods
     };
   }
-  return { money, quantity: qty, receivePurchase, recipeCost, produce, validateOrder, financialSummary, convertQuantity };
+  return { money, quantity: qty, receivePurchase, recipeCost, produce, productionCapacity, validateOrder, financialSummary, convertQuantity };
 })();

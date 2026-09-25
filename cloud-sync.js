@@ -108,6 +108,9 @@
   async function saveState(state, revision) {
     return rpc('gelatos_save_state', { p_slug: config.storeSlug, p_state: state, p_revision: revision });
   }
+  async function registerProduction(recipeId, batches, date) {
+    return rpc('gelatos_register_production', { p_slug: config.storeSlug, p_recipe_id: recipeId, p_batches: batches, p_date: date });
+  }
   async function getCatalog() {
     const result = await rpc('gelatos_get_public_catalog', { p_slug: config.storeSlug }, false);
     if (!result?.payload || !Array.isArray(result.payload.products)) throw new Error('O cardápio ainda está sendo preparado. Tente novamente em instantes.');
@@ -118,6 +121,9 @@
     if (!ids.length) return { images: {} };
     const result = await rpc('gelatos_get_public_images', { p_slug: config.storeSlug, p_image_ids: ids }, false);
     return { images: result?.images && typeof result.images === 'object' ? result.images : {} };
+  }
+  async function getMediaRecovery() {
+    return rpc('gelatos_get_media_recovery', { p_slug: config.storeSlug });
   }
   async function uploadMedia(key, dataUrl) {
     const endpoint = String(config.mediaWorkerUrl || '').replace(/\/$/, '');
@@ -172,5 +178,5 @@
   }
   function isPasswordRecovery() { return passwordRecovery; }
 
-  window.GelatosCloud = Object.freeze({ config, hasSession, email, signUp, signIn, signOut, resetPassword, updatePassword, isPasswordRecovery, isConnectionError, claimStore, getState, getRevision, saveState, getCatalog, getCatalogImages, uploadMedia, placeCustomerOrder, listMembers, addMember, removeMember, listBackups, restoreBackup });
+  window.GelatosCloud = Object.freeze({ config, hasSession, email, signUp, signIn, signOut, resetPassword, updatePassword, isPasswordRecovery, isConnectionError, claimStore, getState, getRevision, saveState, registerProduction, getCatalog, getCatalogImages, getMediaRecovery, uploadMedia, placeCustomerOrder, listMembers, addMember, removeMember, listBackups, restoreBackup });
 })();
