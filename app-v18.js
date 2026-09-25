@@ -198,6 +198,23 @@
     const old = raw && typeof raw === 'object' ? raw : {};
     const settings = old.settings || {};
     const productCategories = normalizeProductCategories(old.productCategories);
+    // A versão antiga guardava uma única logo em base64 em `logoDataUrl`.
+    // Depois da migração para R2, não podemos recriar esse arquivo pesado na
+    // memória a cada abertura: ele acabaria seguindo de volta para a nuvem em
+    // qualquer salvamento comum. A compatibilidade é mantida apenas enquanto
+    // a respectiva logo ainda não tem uma URL externa.
+    const normalizedSettings = {
+      ...DEFAULT_SETTINGS, ...settings,
+      homeLogoDataUrl: settings.homeLogoDataUrl || (settings.homeLogoUrl ? '' : settings.logoDataUrl || ''),
+      headerLogoDataUrl: settings.headerLogoDataUrl || (settings.headerLogoUrl ? '' : settings.logoDataUrl || ''),
+      homeLogoUrl: settings.homeLogoUrl || '',
+      headerLogoUrl: settings.headerLogoUrl || '',
+      catalogLogoUrl: settings.catalogLogoUrl || ''
+    };
+    // Só descartamos a chave legada se as duas posições que a utilizavam já
+    // estão confirmadas no R2. Assim instalações antigas continuam podendo
+    // abrir suas logos antes de concluírem a própria migração.
+    if (normalizedSettings.homeLogoUrl && normalizedSettings.headerLogoUrl) delete normalizedSettings.logoDataUrl;
     const categoryId = item => productCategories.some(entry => String(entry.id) === String(item?.productCategoryId))
       ? String(item.productCategoryId)
       : (productCategories.some(entry => entry.id === legacyCategoryId(item?.productType)) ? legacyCategoryId(item?.productType) : productCategories[0].id);
@@ -302,14 +319,7 @@
       })).filter(item => item.name) : [],
       notifications: Array.isArray(old.notifications) ? old.notifications : [],
       notificationKeys: Array.isArray(old.notificationKeys) ? old.notificationKeys : [],
-      settings: {
-        ...DEFAULT_SETTINGS, ...settings,
-        homeLogoDataUrl: settings.homeLogoDataUrl || settings.logoDataUrl || '',
-        headerLogoDataUrl: settings.headerLogoDataUrl || settings.logoDataUrl || '',
-        homeLogoUrl: settings.homeLogoUrl || '',
-        headerLogoUrl: settings.headerLogoUrl || '',
-        catalogLogoUrl: settings.catalogLogoUrl || ''
-      }
+      settings: normalizedSettings
     };
   }
   function load() {
@@ -574,7 +584,12 @@
     }, delay);
   }
   async function syncCloudNow(silent = false) {
-    if (cloudSaving || cloudRevision === null || !window.GelatosCloud?.hasSession()) return;
+    // O timer de 800 ms pode ficar pendente quando uma ação precisa salvar
+    // imediatamente (produção, recuperação de imagens). Sem esta guarda, o
+    // mesmo estado seria transmitido uma segunda vez pouco depois.
+    if (cloudSaving || !cloudDirty || cloudRevision === null || !window.GelatosCloud?.hasSession()) return;
+    clearTimeout(cloudSyncTimer);
+    cloudSyncTimer = null;
     cloudSaving = true;
     try {
       const sent = cloneData(data);
@@ -1987,7 +2002,7 @@
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=49';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=50';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -1996,7 +2011,7 @@
   }
   function managementCatalogLink() {
     const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    return base + 'customer.html?v=49&gestao=1';
+    return base + 'customer.html?v=50&gestao=1';
   }
   function noticesPanel() {
     if (!state.notices) return '';
@@ -3722,7 +3737,7 @@
     const updateButton = $('#appUpdate');
     const showUpdate = () => { if (updateButton) updateButton.hidden = false; };
     updateButton?.addEventListener('click', () => location.reload());
-    navigator.serviceWorker.register('./service-worker.js?v=49').then(registration => {
+    navigator.serviceWorker.register('./service-worker.js?v=50').then(registration => {
       // Solicita a checagem mesmo em quem abre o atalho instalado há semanas.
       registration.update().catch(() => {});
       if (registration.waiting) showUpdate();

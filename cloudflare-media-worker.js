@@ -57,7 +57,9 @@ function dataUrlToBytes(value) {
 async function isCompanyMember(request, env) {
   const authorization = request.headers.get('Authorization') || '';
   if (!/^Bearer\s+\S+$/i.test(authorization)) return false;
-  const check = await fetch(env.SUPABASE_URL + '/rest/v1/rpc/gelatos_get_state', {
+  // A checagem de permissão não precisa baixar todo o estoque, financeiro e
+  // histórico da empresa. A RPC leve devolve apenas revisão, data e papel.
+  const check = await fetch(env.SUPABASE_URL + '/rest/v1/rpc/gelatos_get_revision', {
     method: 'POST',
     headers: {
       'apikey': env.SUPABASE_ANON_KEY,
