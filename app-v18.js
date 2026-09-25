@@ -112,12 +112,21 @@
   };
   const optimizeCatalogImageData = source => optimizeImageDataUrl(source, { maxSide: 512, mime: 'image/jpeg', quality: 0.7 });
   const optimizeBrandImageData = source => optimizeImageDataUrl(source, { maxSide: 640, mime: 'image/webp', quality: 0.82 });
+  // Uma foto nova recebe um endereço único. Assim a foto trocada nunca fica
+  // presa no cache do navegador do cliente.
+  const mediaExtension = source => /^data:image\/png/i.test(String(source || '')) ? 'png' : /^data:image\/webp/i.test(String(source || '')) ? 'webp' : 'jpg';
+  const mediaKey = (folder, id, source) => 'gelatos-lele/' + folder + '/' + String(id || uid()).replace(/[^a-z0-9_-]/gi, '-').toLowerCase() + '-' + uid() + '.' + mediaExtension(source);
+  const hasMediaStorage = () => Boolean(window.GelatosCloud?.config?.mediaWorkerUrl && window.GelatosCloud?.hasSession?.());
+  const mediaSource = item => String(item?.imageUrl || item?.imageData || '');
 
   const DEFAULT_SETTINGS = {
     pixKey: '',
     homeLogoDataUrl: '',
     headerLogoDataUrl: '',
     catalogLogoDataUrl: '',
+    homeLogoUrl: '',
+    headerLogoUrl: '',
+    catalogLogoUrl: '',
     whatsappTemplate: 'Olá, {nome}!\n\nSeu pedido Gelatos Lele foi confirmado!\n\n{itens}\n\nValor total: {total}\n\nChave Pix: {pix}',
     catalogName: 'Gelatos Lele',
     catalogIntro: 'Geladinhos artesanais preparados com carinho. Confira os sabores disponíveis e faça seu pedido.',
@@ -296,7 +305,10 @@
       settings: {
         ...DEFAULT_SETTINGS, ...settings,
         homeLogoDataUrl: settings.homeLogoDataUrl || settings.logoDataUrl || '',
-        headerLogoDataUrl: settings.headerLogoDataUrl || settings.logoDataUrl || ''
+        headerLogoDataUrl: settings.headerLogoDataUrl || settings.logoDataUrl || '',
+        homeLogoUrl: settings.homeLogoUrl || '',
+        headerLogoUrl: settings.headerLogoUrl || '',
+        catalogLogoUrl: settings.catalogLogoUrl || ''
       }
     };
   }
@@ -703,8 +715,8 @@
   const activeSupplies = () => data.supplies.filter(item => item.active !== false);
   const ready = () => byId(data.readyStock, 'recipeId');
   const recipeById = () => byId(data.recipes);
-  const headerLogo = () => data.settings.headerLogoDataUrl || 'logo-transparente-v2.png';
-  const homeLogo = () => data.settings.homeLogoDataUrl || headerLogo();
+  const headerLogo = () => data.settings.headerLogoUrl || data.settings.headerLogoDataUrl || 'logo-transparente-v2.png';
+  const homeLogo = () => data.settings.homeLogoUrl || data.settings.homeLogoDataUrl || headerLogo();
   const detail = (title, subtitle, value, badge, body) => '<details class="list-card"><summary><div class="list-main"><div><h3>' + esc(title) + '</h3><p>' + subtitle + '</p></div><div><span class="badge ' + esc(badge || '') + '">' + esc(badge || '') + '</span><div class="list-value">' + value + '</div></div></div></summary><div class="details-body">' + body + '</div></details>';
   const options = (items, selected, label = item => item.name) => '<option value="">Selecione</option>' + items.map(item => '<option value="' + esc(item.id) + '"' + (String(item.id) === String(selected) ? ' selected' : '') + '>' + esc(label(item)) + '</option>').join('');
   const field = (label, control, help = '') => '<label class="form-field"><span>' + esc(label) + (help ? info(help) : '') + '</span>' + control + '</label>';
@@ -1664,7 +1676,8 @@
       const line = metrics?.lines.find(entry => String(entry.supplyId) === String(item.supplyId));
       return '<li><b>' + esc(supply?.name || 'Item removido') + '</b><span>' + qtyText(item.quantity) + ' ' + esc(item.unit || supply?.unit || '') + (line ? ' · ' + money(line.total) : '') + '</span></li>';
     }).join('') || '<li>Sem ingredientes cadastrados.</li>';
-    const photo = recipe.imageData ? '<img class="recipe-view-image" src="' + esc(recipe.imageData) + '" alt="' + esc(recipe.name) + '">' : '';
+    const photoUrl = mediaSource(recipe);
+    const photo = photoUrl ? '<img class="recipe-view-image" src="' + esc(photoUrl) + '" alt="' + esc(recipe.name) + '">' : '';
     const financial = metrics
       ? '<section class="recipe-cost-summary view"><div><span>Preço de venda</span><b>' + money(metrics.saleUnitPrice) + '</b></div><div><span>Materiais / lote</span><b>' + money(metrics.materialCost) + '</b></div><div><span>Mão de obra / lote</span><b>' + money(metrics.laborCost) + '</b></div><div><span>Custo / geladinho</span><b>' + money(metrics.unitCost) + '</b></div><div class="recipe-profit"><span>Lucro bruto / geladinho</span><b>' + money(metrics.unitProfit) + '</b><small>' + metrics.margin.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '% do preço de venda</small></div><small>Lucro bruto: preço de venda − custo dos materiais e mão de obra. O lucro real da empresa também considera despesas e frete no Financeiro.</small></section>'
       : '<section class="panel caution"><b>Não foi possível calcular o custo.</b><p>' + esc(costError) + '</p></section>';
@@ -1675,7 +1688,8 @@
       const product = ready()[recipe.id];
       const quantity = product ? round(product.quantity) : 0;
       const source = 'Categoria: ' + categoryFor(recipe).name + ' · ' + (product ? 'em estoque: ' + quantity + ' un.' : 'ainda não foi produzido');
-      const photo = recipe.imageData ? '<div class="customer-preview"><img src="' + esc(recipe.imageData) + '" alt=""></div>' : '';
+      const photoUrl = mediaSource(recipe);
+      const photo = photoUrl ? '<div class="customer-preview"><img src="' + esc(photoUrl) + '" alt=""></div>' : '';
       let metrics = null;
       try { metrics = recipeMetrics(recipe); } catch (_) { /* A visualização explicará o item que falta. */ }
       const profit = metrics ? '<p class="recipe-card-profit"><b>Lucro bruto por geladinho:</b> ' + money(metrics.unitProfit) + ' · ' + metrics.margin.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '%</p>' : '<p class="form-note">Complete os custos para calcular o lucro por geladinho.</p>';
@@ -1903,7 +1917,7 @@
         field('WhatsApp da empresa', '<input name="catalogPhone" inputmode="tel" value="' + esc(data.settings.catalogPhone || '') + '">', 'É usado se o celular não tiver a opção de compartilhar disponível.') +
         field('Endereço / instruções', '<textarea name="businessAddress" rows="3">' + esc(data.settings.businessAddress || '') + '</textarea>', 'Ex.: retirada no endereço, horário ou taxa de entrega.') +
         '<section class="panel nested-panel"><h2>Encomendas agendadas</h2><p class="form-note">Ao receber uma encomenda, o sistema separa imediatamente os sabores que já existem no estoque. Só o saldo que falta entra na produção pendente.</p><label class="catalog-switch"><input name="scheduledEnabled" type="checkbox"' + (data.settings.scheduledEnabled !== false ? ' checked' : '') + '> Permitir encomendas no cardápio</label><div class="form-grid two">' + field('Prazo mínimo (dias)', '<input name="scheduledLeadDays" inputmode="numeric" value="' + esc(data.settings.scheduledLeadDays || '2') + '" placeholder="Ex.: 2">', 'O cliente só poderá escolher datas a partir deste número de dias. O mínimo do sistema é 2 dias.') + field('Limite por data (geladinhos)', '<input name="scheduledMaxItemsPerDay" inputmode="decimal" value="' + esc(data.settings.scheduledMaxItemsPerDay || '') + '" placeholder="Deixe em branco para não limitar">', 'Evita aceitar mais encomendas do que a produção comporta em um mesmo dia. Conta apenas o que ainda precisa ser produzido para a data.') + '</div></section>' +
-        '<button class="primary full">Salvar informações do cardápio</button></form><section class="panel"><h2>Imagens leves para o cardápio</h2><p>Fotos e logos grandes aumentam o tráfego da nuvem. Esta ação diminui as imagens já cadastradas, sem mexer em estoque, pedidos ou valores.</p><button class="secondary full" type="button" data-action="optimize-catalog-images">Otimizar fotos e logos atuais</button></section><section class="panel"><h2>Link para enviar ao cliente</h2><p>Pronta entrega mostra somente o que já foi produzido. Encomenda mostra os sabores ativos, pede uma data com o prazo mínimo e já separa o estoque que estiver pronto.</p><div class="customer-link"><input readonly value="' + esc(link) + '"><button class="secondary" type="button" data-action="copy-catalog-link">Copiar link</button></div><div class="button-row"><button class="outline" type="button" data-action="open-catalog-management">Abrir para conferir</button></div><p class="form-note">Use “Abrir para conferir” no celular de gestão: o botão “Voltar à gestão” aparecerá somente nessa abertura. O link copiado continua sendo a versão limpa para o cliente.</p><p class="form-note">Com a nuvem ativada, os pedidos entram diretamente no Controle de pedidos.</p></section></section>';
+        '<button class="primary full">Salvar informações do cardápio</button></form><section class="panel"><h2>Imagens leves para o cardápio</h2><p>Fotos e logos grandes aumentam o tráfego da nuvem. Esta ação diminui as imagens já cadastradas, sem mexer em estoque, pedidos ou valores.</p><button class="secondary full" type="button" data-action="optimize-catalog-images">Otimizar fotos e logos atuais</button>' + (hasMediaStorage() ? '<hr><h3>Mover imagens para o armazenamento econômico</h3><p class="form-note">Faz uma única migração das fotos e logos antigas. Imagens novas já são salvas lá automaticamente.</p><button class="primary full" type="button" data-action="migrate-catalog-media">Migrar fotos e logos agora</button>' : '') + '</section><section class="panel"><h2>Link para enviar ao cliente</h2><p>Pronta entrega mostra somente o que já foi produzido. Encomenda mostra os sabores ativos, pede uma data com o prazo mínimo e já separa o estoque que estiver pronto.</p><div class="customer-link"><input readonly value="' + esc(link) + '"><button class="secondary" type="button" data-action="copy-catalog-link">Copiar link</button></div><div class="button-row"><button class="outline" type="button" data-action="open-catalog-management">Abrir para conferir</button></div><p class="form-note">Use “Abrir para conferir” no celular de gestão: o botão “Voltar à gestão” aparecerá somente nessa abertura. O link copiado continua sendo a versão limpa para o cliente.</p><p class="form-note">Com a nuvem ativada, os pedidos entram diretamente no Controle de pedidos.</p></section></section>';
     }
     if (section === 'delivery') {
       const draft = state.deliveryDraft || (state.deliveryDraft = defaultDeliveryDraft());
@@ -1951,6 +1965,7 @@
       scheduledLeadDays: Math.max(2, Math.round(n(data.settings.scheduledLeadDays || 2))),
       scheduledMaxItemsPerDay: Math.max(0, n(data.settings.scheduledMaxItemsPerDay)),
       logo: data.settings.catalogLogoDataUrl || data.settings.headerLogoDataUrl || '',
+      logoUrl: data.settings.catalogLogoUrl || data.settings.headerLogoUrl || '',
       categories: productCategories().map(category => ({ id: category.id, name: category.name })),
       products: data.recipes.filter(recipe => recipe.active !== false).map(recipe => ({
         id: recipe.id,
@@ -1961,13 +1976,14 @@
         description: recipe.description || '',
         price: n(recipe.saleUnitPrice),
         available: n(ready()[recipe.id]?.quantity),
-        image: recipe.imageData || ''
+        image: recipe.imageData || '',
+        imageUrl: recipe.imageUrl || ''
       }))
     };
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=46';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=47';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -1976,7 +1992,7 @@
   }
   function managementCatalogLink() {
     const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    return base + 'customer.html?v=46&gestao=1';
+    return base + 'customer.html?v=47&gestao=1';
   }
   function noticesPanel() {
     if (!state.notices) return '';
@@ -2444,7 +2460,7 @@
     toast('Estoque produzido atualizado.');
     navigate('stock:ready');
   }
-  function saveRecipe(form) {
+  async function saveRecipe(form) {
     const f = form.elements;
     const items = state.recipeLines.map(line => ({ supplyId: line.supplyId, quantity: n(line.quantity), unit: String(line.unit || '').trim() })).filter(line => line.supplyId && line.quantity > 0 && line.unit);
     if (!control(form, 'name').value.trim() || !(n(f.yieldUnits.value) > 0) || !(n(f.saleUnitPrice.value) >= 0) || !items.length) {
@@ -2453,10 +2469,28 @@
     }
     const recipeId = control(form, 'id').value;
     const old = recipeId ? recipeById()[recipeId] : null;
-    const write = imageData => {
+    const stableId = recipeId || uid();
+    const write = async imageData => {
+      let imageUrl = old?.imageUrl || '';
+      let imageKey = old?.imageKey || '';
+      let storedImageData = old?.imageData || '';
+      if (imageData) {
+        storedImageData = imageData;
+        if (hasMediaStorage()) {
+          toast('Enviando a foto para o armazenamento econômico…');
+          try {
+            const uploaded = await window.GelatosCloud.uploadMedia(mediaKey('recipes', stableId, imageData), imageData);
+            imageUrl = uploaded.url;
+            imageKey = uploaded.key;
+            storedImageData = '';
+          } catch (error) {
+            toast('A foto foi mantida neste celular; o envio para imagens será tentado na migração.');
+          }
+        }
+      }
       const selectedCategory = productCategories().find(category => category.id === f.productCategoryId.value) || productCategories()[0];
       const recipe = {
-        id: recipeId || uid(),
+        id: stableId,
         name: control(form, 'name').value.trim(),
         productCategoryId: selectedCategory.id,
         productType: selectedCategory.name,
@@ -2466,7 +2500,9 @@
         laborMode: f.laborMode.value === 'unit' ? 'unit' : 'batch',
         description: f.description.value.trim(),
         preparation: f.preparation.value.trim(),
-        imageData: imageData || old?.imageData || '',
+        imageData: storedImageData,
+        imageUrl,
+        imageKey,
         active: f.active.checked,
         items
       };
@@ -2490,10 +2526,11 @@
     };
     const image = f.image.files[0];
     if (!image) {
-      write('');
+      await write('');
       return;
     }
-    optimizeProductImage(image).then(write).catch(error => toast(error.message || 'Não foi possível ler a imagem. Tente outra foto.'));
+    try { await write(await optimizeProductImage(image)); }
+    catch (error) { toast(error.message || 'Não foi possível ler a imagem. Tente outra foto.'); }
   }
   function saveProduction(form) {
     const f = form.elements;
@@ -2698,11 +2735,24 @@
     toast('Mensagem e Pix atualizados.');
     navigate('settings:home');
   }
-  function saveCatalogSettings(form) {
+  async function saveCatalogSettings(form) {
     const f = form.elements;
     const leadDays = Math.max(2, Math.min(30, Math.round(n(f.scheduledLeadDays.value || 2))));
     const maxItems = Math.max(0, qty(f.scheduledMaxItemsPerDay.value));
-    const write = logo => {
+    const write = async logo => {
+      let catalogLogoUrl = data.settings.catalogLogoUrl || '';
+      let catalogLogoDataUrl = data.settings.catalogLogoDataUrl || '';
+      if (logo) {
+        catalogLogoDataUrl = logo;
+        if (hasMediaStorage()) {
+          toast('Enviando a logo para o armazenamento econômico…');
+          try {
+            const uploaded = await window.GelatosCloud.uploadMedia(mediaKey('branding', 'catalogo', logo), logo);
+            catalogLogoUrl = uploaded.url;
+            catalogLogoDataUrl = '';
+          } catch (_) { toast('A logo foi mantida neste celular; o envio será tentado na migração.'); }
+        }
+      }
       Object.assign(data.settings, {
         catalogName: f.catalogName.value.trim() || 'Gelatos Lele',
         catalogIntro: f.catalogIntro.value.trim(),
@@ -2711,15 +2761,17 @@
         scheduledEnabled: Boolean(f.scheduledEnabled.checked),
         scheduledLeadDays: String(leadDays),
         scheduledMaxItemsPerDay: maxItems > 0 ? String(maxItems) : '',
-        catalogLogoDataUrl: logo || data.settings.catalogLogoDataUrl || ''
+        catalogLogoDataUrl,
+        catalogLogoUrl
       });
       save();
       toast('Informações do cardápio atualizadas.');
       navigate('settings:catalog');
     };
     const logo = f.catalogLogo?.files?.[0];
-    if (!logo) { write(''); return; }
-    optimizeBrandImage(logo).then(write).catch(error => toast(error.message || 'Não foi possível ler a logo.'));
+    if (!logo) { await write(''); return; }
+    try { await write(await optimizeBrandImage(logo)); }
+    catch (error) { toast(error.message || 'Não foi possível ler a logo.'); }
   }
   function saveDeliverySettings(form) {
     const draft = deliveryDraftFromForm(form);
@@ -2772,19 +2824,57 @@
     toast(changed + (changed === 1 ? ' imagem foi otimizada.' : ' imagens foram otimizadas.'));
     render();
   }
-  function saveAppearance(form) {
+  async function migrateCatalogMedia() {
+    if (!hasMediaStorage()) { toast('Entre na nuvem e conclua a configuração do armazenamento de imagens primeiro.'); return; }
+    const candidates = [
+      ...data.recipes.map(recipe => ({ owner: recipe, dataKey: 'imageData', urlKey: 'imageUrl', keyKey: 'imageKey', folder: 'recipes', id: recipe.id, label: recipe.name })),
+      { owner: data.settings, dataKey: 'homeLogoDataUrl', urlKey: 'homeLogoUrl', keyKey: 'homeLogoKey', folder: 'branding', id: 'logo-inicial', label: 'logo inicial' },
+      { owner: data.settings, dataKey: 'headerLogoDataUrl', urlKey: 'headerLogoUrl', keyKey: 'headerLogoKey', folder: 'branding', id: 'logo-cabecalho', label: 'logo do cabeçalho' },
+      { owner: data.settings, dataKey: 'catalogLogoDataUrl', urlKey: 'catalogLogoUrl', keyKey: 'catalogLogoKey', folder: 'branding', id: 'logo-catalogo', label: 'logo do cardápio' }
+    ].filter(item => String(item.owner?.[item.dataKey] || '').startsWith('data:image/'));
+    if (!candidates.length) { toast('Não há fotos ou logos antigas para migrar.'); return; }
+    let sent = 0;
+    let failed = 0;
+    for (const item of candidates) {
+      toast('Movendo imagem ' + (sent + failed + 1) + ' de ' + candidates.length + ' para o armazenamento econômico…');
+      try {
+        const source = item.owner[item.dataKey];
+        const uploaded = await window.GelatosCloud.uploadMedia(mediaKey(item.folder, item.id, source), source);
+        item.owner[item.urlKey] = uploaded.url;
+        item.owner[item.keyKey] = uploaded.key;
+        item.owner[item.dataKey] = '';
+        sent += 1;
+      } catch (_) { failed += 1; }
+    }
+    if (sent) save();
+    render();
+    toast(failed ? sent + ' imagem(ns) movida(s); ' + failed + ' ainda será(ão) tentada(s) depois.' : sent + (sent === 1 ? ' imagem foi movida' : ' imagens foram movidas') + ' para o armazenamento econômico.');
+  }
+  async function saveAppearance(form) {
     const f = form.elements;
     const files = [{ file: f.homeLogo.files[0], key: 'homeLogoDataUrl' }, { file: f.headerLogo.files[0], key: 'headerLogoDataUrl' }].filter(item => item.file);
     if (!files.length) {
       toast('Escolha ao menos uma imagem para trocar a logo.');
       return;
     }
-    Promise.all(files.map(async item => ({ key: item.key, value: await optimizeBrandImage(item.file) }))).then(items => {
-      items.forEach(item => { data.settings[item.key] = item.value; });
+    try {
+      const items = await Promise.all(files.map(async item => ({ key: item.key, value: await optimizeBrandImage(item.file) })));
+      for (const item of items) {
+        const urlKey = item.key.replace('DataUrl', 'Url');
+        data.settings[item.key] = item.value;
+        if (hasMediaStorage()) {
+          toast('Enviando a logo para o armazenamento econômico…');
+          try {
+            const uploaded = await window.GelatosCloud.uploadMedia(mediaKey('branding', urlKey, item.value), item.value);
+            data.settings[urlKey] = uploaded.url;
+            data.settings[item.key] = '';
+          } catch (_) { toast('A logo foi mantida neste celular; o envio será tentado na migração.'); }
+        }
+      }
       save();
       toast('Logo atualizada.');
       navigate('settings:appearance');
-    }).catch(error => toast(error.message || 'Não foi possível ler a logo.'));
+    } catch (error) { toast(error.message || 'Não foi possível ler a logo.'); }
   }
   function markPaid(id) {
     const order = data.orders.find(item => String(item.id) === String(id));
@@ -3393,6 +3483,7 @@
     if (action === 'clear-filter') { state.reportFilter = { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '' }; render(); return; }
     if (action === 'export-xlsx') { exportXlsx(); return; }
     if (action === 'optimize-catalog-images') { optimizeCatalogImages(); return; }
+    if (action === 'migrate-catalog-media') { migrateCatalogMedia(); return; }
     if (action === 'copy-catalog-link') { copyCatalogLink(); return; }
     if (action === 'open-catalog-management') { location.href = managementCatalogLink(); return; }
     if (action === 'cloud-refresh') { forceCloudRefresh(); return; }
@@ -3411,7 +3502,7 @@
       return;
     }
     if (action === 'cancel-restore') { state.restorePreview = null; navigate('settings:backup'); return; }
-    if (action === 'restore-default-logos') { data.settings.homeLogoDataUrl = ''; data.settings.headerLogoDataUrl = ''; save(); toast('Logo padrão restaurada.'); render(); }
+    if (action === 'restore-default-logos') { data.settings.homeLogoDataUrl = ''; data.settings.headerLogoDataUrl = ''; data.settings.homeLogoUrl = ''; data.settings.headerLogoUrl = ''; save(); toast('Logo padrão restaurada.'); render(); }
   });
   document.addEventListener('change', event => {
     const target = event.target;
@@ -3549,10 +3640,10 @@
   $('#app').innerHTML = '<div class="boot">Carregando Gelatos Lele…</div>';
   render();
   loadCloudOnStart();
-  // Consulta só a revisão a cada 20 segundos; os dados completos são baixados
-  // apenas quando algo muda. Assim os dois celulares se atualizam depressa sem
-  // ficar baixando fotos e cadastros a cada consulta.
-  setInterval(() => refreshFromCloud(true), 20000);
+  // Consulta só a revisão a cada minuto, e somente enquanto a gestão estiver
+  // visível. Os dados completos são baixados apenas quando algo muda. Pedido e
+  // estoque continuam sendo validados pelo servidor no momento da confirmação.
+  setInterval(() => refreshFromCloud(true), 60000);
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) refreshFromCloud(true);
   });
@@ -3565,7 +3656,7 @@
     const updateButton = $('#appUpdate');
     const showUpdate = () => { if (updateButton) updateButton.hidden = false; };
     updateButton?.addEventListener('click', () => location.reload());
-    navigator.serviceWorker.register('./service-worker.js?v=46').then(registration => {
+    navigator.serviceWorker.register('./service-worker.js?v=47').then(registration => {
       // Solicita a checagem mesmo em quem abre o atalho instalado há semanas.
       registration.update().catch(() => {});
       if (registration.waiting) showUpdate();

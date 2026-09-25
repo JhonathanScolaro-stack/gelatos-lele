@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v46-lazy-catalog-images';
+const CACHE = 'gelatos-lele-company-v47-r2-media';
 const ASSETS = [
   './',
   './index.html',

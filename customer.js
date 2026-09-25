@@ -28,7 +28,7 @@
     const type = productType(value);
     return type === 'Água' ? 'agua' : type === 'Leite' ? 'leite' : 'gourmet';
   };
-  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=46';
+  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=47';
   const openedFromManagement = () => new URLSearchParams(location.search).get('gestao') === '1';
   const ORDER_ATTEMPT_KEY = 'gelatos-lele-customer-order-attempt-v1';
   const CUSTOMER_CLIENT_KEY = 'gelatos-lele-customer-client-v1';
@@ -70,17 +70,17 @@
     if (!catalog) return null;
     if (id === CATALOG_LOGO_ID) return {
       id,
-      source: String(catalog.logo || '').trim(),
+      source: String(catalog.logoUrl || catalog.logo || '').trim(),
       token: String(catalog.logoToken || '').trim(),
-      exists: Boolean(catalog.hasLogo || catalog.logo)
+      exists: Boolean(catalog.hasLogo || catalog.logoUrl || catalog.logo)
     };
     const product = catalog.products.find(item => String(item.id) === String(id));
     if (!product) return null;
     return {
       id: String(product.id),
-      source: String(product.image || '').trim(),
+      source: String(product.imageUrl || product.image || '').trim(),
       token: String(product.imageToken || '').trim(),
-      exists: Boolean(product.hasImage || product.image)
+      exists: Boolean(product.hasImage || product.imageUrl || product.image)
     };
   }
   function imageCacheKey(id, token) {

@@ -119,6 +119,29 @@
     const result = await rpc('gelatos_get_public_images', { p_slug: config.storeSlug, p_image_ids: ids }, false);
     return { images: result?.images && typeof result.images === 'object' ? result.images : {} };
   }
+  async function uploadMedia(key, dataUrl) {
+    const endpoint = String(config.mediaWorkerUrl || '').replace(/\/$/, '');
+    if (!endpoint) throw new Error('O armazenamento de imagens ainda não está configurado.');
+    const accessToken = await authenticatedToken();
+    let response;
+    try {
+      response = await fetch(endpoint + '/media', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + accessToken },
+        body: JSON.stringify({ key, dataUrl }),
+        cache: 'no-store'
+      });
+    } catch (_) {
+      const error = new Error('CONEXAO_NUVEM_INDISPONIVEL');
+      error.code = 'CONEXAO_NUVEM_INDISPONIVEL';
+      throw error;
+    }
+    const raw = await response.text();
+    let body = null;
+    try { body = raw ? JSON.parse(raw) : null; } catch (_) { body = raw; }
+    if (!response.ok || !body?.url) throw new Error(messageFrom(body, 'Não foi possível enviar a imagem.'));
+    return body;
+  }
   async function placeCustomerOrder(order) {
     return rpc('gelatos_place_customer_order', {
       p_slug: config.storeSlug,
@@ -149,5 +172,5 @@
   }
   function isPasswordRecovery() { return passwordRecovery; }
 
-  window.GelatosCloud = Object.freeze({ config, hasSession, email, signUp, signIn, signOut, resetPassword, updatePassword, isPasswordRecovery, isConnectionError, claimStore, getState, getRevision, saveState, getCatalog, getCatalogImages, placeCustomerOrder, listMembers, addMember, removeMember, listBackups, restoreBackup });
+  window.GelatosCloud = Object.freeze({ config, hasSession, email, signUp, signIn, signOut, resetPassword, updatePassword, isPasswordRecovery, isConnectionError, claimStore, getState, getRevision, saveState, getCatalog, getCatalogImages, uploadMedia, placeCustomerOrder, listMembers, addMember, removeMember, listBackups, restoreBackup });
 })();
