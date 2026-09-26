@@ -28,7 +28,7 @@
     const type = productType(value);
     return type === 'Água' ? 'agua' : type === 'Leite' ? 'leite' : 'gourmet';
   };
-  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=50';
+  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=51';
   const openedFromManagement = () => new URLSearchParams(location.search).get('gestao') === '1';
   const ORDER_ATTEMPT_KEY = 'gelatos-lele-customer-order-attempt-v1';
   const CUSTOMER_CLIENT_KEY = 'gelatos-lele-customer-client-v1';
@@ -53,7 +53,7 @@
   let selectedProductId = '';
   let openCategoryId = '';
   let reviewing = false;
-  let draft = { customer: '', phone: '', mode: 'Retirada', zoneId: '', address: '', payment: 'Pix', orderKind: 'ready', scheduledFor: '' };
+  let draft = { customer: '', phone: '', mode: 'Retirada', zoneId: '', address: '', thermasGleba: '', thermasQuadra: '', thermasLote: '', thermasRua: '', thermasNumero: '', locationUrl: '', payment: 'Pix', orderKind: 'ready', scheduledFor: '' };
   let orderAttemptId = '';
   let publicImages = Object.create(null);
   let pendingPublicImages = new Set();
@@ -135,7 +135,7 @@
     }));
     const modes = availableModes();
     if (!preserveDraft) {
-      draft = { customer: '', phone: '', mode: modes[0] || 'Retirada', zoneId: deliveryZones()[0]?.id || '', address: '', payment: 'Pix', orderKind: 'ready', scheduledFor: scheduledMinDate() };
+      draft = { customer: '', phone: '', mode: modes[0] || 'Retirada', zoneId: deliveryZones()[0]?.id || '', address: '', thermasGleba: '', thermasQuadra: '', thermasLote: '', thermasRua: '', thermasNumero: '', locationUrl: '', payment: 'Pix', orderKind: 'ready', scheduledFor: scheduledMinDate() };
       orderAttemptId = '';
       sessionStorage.removeItem(ORDER_ATTEMPT_KEY);
     }
@@ -167,7 +167,7 @@
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return '—';
     return new Date(value + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' });
   }
-  function deliveryZones() { return (Array.isArray(catalog?.deliveryZones) ? catalog.deliveryZones : []).map((zone, index) => ({ id: String(zone.id || index), name: String(zone.name || '').trim(), fee: Math.max(0, num(zone.fee)) })).filter(zone => zone.name); }
+  function deliveryZones() { return (Array.isArray(catalog?.deliveryZones) ? catalog.deliveryZones : []).map((zone, index) => { const name = String(zone.name || '').trim(); return { id: String(zone.id || index), name, fee: Math.max(0, num(zone.fee)), requiresThermasAddress: Boolean(zone.requiresThermasAddress) || /thermas/i.test(name) }; }).filter(zone => zone.name); }
   function selectedProducts() { return catalog.products.filter(product => quantities[product.id] > 0); }
   function catalogCategories() {
     const entries = Array.isArray(catalog?.categories) ? catalog.categories : [];
@@ -208,6 +208,14 @@
     });
   }
   function isDelivery() { return String(draft.mode || '').toLocaleLowerCase('pt-BR').includes('entrega'); }
+  function thermasRequired(zone) { return Boolean(zone?.requiresThermasAddress) || /thermas/i.test(String(zone?.name || '')); }
+  function deliveryAddress(result = orderTotals()) {
+    if (!result.delivery || !thermasRequired(result.zone)) return draft.address.trim();
+    const fields = ['Thermas Resort Residence', 'Gleba ' + draft.thermasGleba, 'Quadra ' + draft.thermasQuadra, 'Lote ' + draft.thermasLote, 'Rua ' + draft.thermasRua, 'Número ' + draft.thermasNumero];
+    if (draft.address.trim()) fields.push('Referência: ' + draft.address.trim());
+    if (draft.locationUrl.trim()) fields.push('Localização fixa: ' + draft.locationUrl.trim());
+    return fields.join('\n');
+  }
   function syncDraft(form) {
     if (!form) return;
     const f = form.elements;
@@ -216,6 +224,12 @@
     if (f.mode) draft.mode = f.mode.value;
     if (f.zoneId) draft.zoneId = f.zoneId.value;
     if (f.address) draft.address = f.address.value;
+    if (f.thermasGleba) draft.thermasGleba = f.thermasGleba.value;
+    if (f.thermasQuadra) draft.thermasQuadra = f.thermasQuadra.value;
+    if (f.thermasLote) draft.thermasLote = f.thermasLote.value;
+    if (f.thermasRua) draft.thermasRua = f.thermasRua.value;
+    if (f.thermasNumero) draft.thermasNumero = f.thermasNumero.value;
+    if (f.locationUrl) draft.locationUrl = f.locationUrl.value;
     if (f.payment) draft.payment = f.payment.value;
     if (f.scheduledFor) draft.scheduledFor = f.scheduledFor.value;
   }
@@ -237,7 +251,9 @@
     if (!result.selected.length) return 'Escolha pelo menos um geladinho.';
     if (isScheduled() && (!/^\d{4}-\d{2}-\d{2}$/.test(draft.scheduledFor) || draft.scheduledFor < scheduledMinDate())) return 'Escolha uma data a partir de ' + scheduledDateText(scheduledMinDate()) + '.';
     if (result.delivery && !result.zone) return 'Escolha o local de entrega.';
-    if (result.delivery && draft.address.trim().length < 5) return 'Informe o endereço de entrega completo.';
+    if (result.delivery && thermasRequired(result.zone)) {
+      if (!['1', '2', '3'].includes(String(draft.thermasGleba)) || ![draft.thermasQuadra, draft.thermasLote, draft.thermasRua, draft.thermasNumero].every(value => String(value || '').trim())) return 'No Thermas, informe Gleba (1, 2 ou 3), quadra, lote, rua e número.';
+    } else if (result.delivery && draft.address.trim().length < 5) return 'Informe o endereço de entrega completo.';
     return '';
   }
   function cartLines(result) {
@@ -256,7 +272,7 @@
     return '<article class="product ' + (soldOut ? 'sold-out' : '') + '"><button class="product-open" type="button" data-action="choose-product" data-product="' + esc(product.id) + '" aria-expanded="' + opened + '">' +
       (imageSource(product.id) ? '<img src="' + esc(imageSource(product.id)) + '" alt="' + esc(product.name) + '">' : '<div class="image-placeholder" aria-hidden="true"></div>') +
       '<span class="product-copy"><span class="product-title"><b>' + esc(product.name) + '</b>' + (chosen ? '<em>' + chosen + ' no pedido</em>' : '') + '</span><span class="product-type category-' + esc(categorySlug(category.id)) + '">' + esc(category.name) + '</span><span class="product-description">' + esc(product.description || 'Geladinho artesanal.') + '</span><span class="price">' + money.format(num(product.price)) + '</span><span class="availability ' + (soldOut ? 'unavailable' : '') + '">' + (scheduled ? 'Disponível por encomenda' : soldOut ? 'Esgotado no momento' : available + ' disponível(is)') + '</span></span><span class="product-arrow" aria-hidden="true">›</span></button>' +
-      (opened ? '<section class="product-picker"><b>' + (soldOut ? 'Este sabor está esgotado.' : 'Quantos você quer?') + '</b>' + (soldOut ? '<span>Acompanhe o cardápio; ele volta a ficar disponível assim que houver produção.</span>' : '<div class="quantity"><button type="button" data-change="' + esc(product.id) + ':-1" aria-label="Diminuir ' + esc(product.name) + '"' + (chosen ? '' : ' disabled') + '>−</button><strong>' + chosen + '</strong><button type="button" data-change="' + esc(product.id) + ':1" aria-label="Aumentar ' + esc(product.name) + '"' + (chosen >= maximum ? ' disabled' : '') + '>+</button><small>' + (scheduled ? 'A Gelatos Lele confirmará a disponibilidade para a data escolhida.' : 'Máximo disponível: ' + available) + '</small></div>') + '</section>' : '') +
+      (opened ? '<section class="product-picker"><b>' + (soldOut ? 'Este sabor está esgotado.' : 'Quantos você quer?') + '</b>' + (soldOut ? '<span>Acompanhe o cardápio; ele volta a ficar disponível assim que houver produção.</span>' : '<div class="quantity"><button type="button" data-change="' + esc(product.id) + ':-1" aria-label="Diminuir ' + esc(product.name) + '"' + (chosen ? '' : ' disabled') + '>−</button><strong>' + chosen + '</strong><button type="button" data-change="' + esc(product.id) + ':1" aria-label="Aumentar ' + esc(product.name) + '"' + (chosen >= maximum ? ' disabled' : '') + '>+</button><small>' + (scheduled ? 'A Gelatos Lele confirmará a disponibilidade para a data escolhida.' : 'Máximo disponível: ' + available) + '</small></div>') + '<button type="button" class="picker-back" data-action="close-product">← Voltar aos sabores</button></section>' : '') +
       '</article>';
   }
   function categoryCard(group) {
@@ -273,17 +289,24 @@
     const freightText = !result.quantity ? 'Selecione os sabores' : !result.delivery ? 'R$ 0,00 (retirada)' : result.free ? 'Grátis' : result.zone ? money.format(result.fee) : 'A combinar';
     return '<div class="total total-breakdown"><span>Subtotal dos geladinhos</span><b>' + money.format(result.subtotal) + '</b><span>Frete' + (result.freeReason ? ' · ' + esc(result.freeReason) : '') + '</span><b>' + freightText + '</b><strong>Valor total</strong><strong>' + money.format(result.total) + '</strong></div>';
   }
+  function thermasFields(result) {
+    if (!result.delivery || !thermasRequired(result.zone)) return '';
+    const location = String(draft.locationUrl || '').trim();
+    return '<section class="thermas-address"><div><h3>Endereço no Thermas</h3><p>Para a entrega chegar certinho, preencha todos os campos.</p></div><div class="thermas-grid"><label>Gleba<select name="thermasGleba" required><option value="">Selecione</option>' + ['1', '2', '3'].map(value => '<option' + (String(draft.thermasGleba) === value ? ' selected' : '') + '>' + value + '</option>').join('') + '</select></label><label>Quadra<input name="thermasQuadra" required value="' + esc(draft.thermasQuadra) + '" placeholder="Ex.: 12"></label><label>Lote<input name="thermasLote" required value="' + esc(draft.thermasLote) + '" placeholder="Ex.: 8"></label><label>Rua<input name="thermasRua" required value="' + esc(draft.thermasRua) + '" placeholder="Ex.: Rua das Palmeiras"></label><label>Número<input name="thermasNumero" required value="' + esc(draft.thermasNumero) + '" placeholder="Ex.: 123"></label></div><input name="locationUrl" type="hidden" value="' + esc(location) + '"><div class="location-actions"><button type="button" class="outline" data-action="capture-location">Usar minha localização fixa</button>' + (location ? '<a href="' + esc(location) + '" target="_blank" rel="noopener">Localização adicionada</a><button type="button" class="text-link" data-action="clear-location">Remover</button>' : '<span>Opcional: envia um ponto fixo do mapa junto do pedido.</span>') + '</div><label>Ponto de referência (opcional)<textarea name="address" placeholder="Ex.: portaria, bloco ou instrução para entrega.">' + esc(draft.address) + '</textarea></label></section>';
+  }
   function orderForm(result, zones, modes) {
     const zoneField = result.delivery ? '<label>Local de entrega<select name="zoneId" required><option value="">Selecione o local</option>' + zones.map(zone => '<option value="' + esc(zone.id) + '"' + (String(zone.id) === String(draft.zoneId) ? ' selected' : '') + '>' + esc(zone.name) + ' · frete ' + money.format(zone.fee) + '</option>').join('') + '</select></label>' : '';
     const pickupNotice = !result.delivery && String(catalog.pickupAddress || '').trim() ? '<section class="notice"><b>Endereço para retirada:</b><br>' + esc(catalog.pickupAddress).replace(/\n/g, '<br>') + '</section>' : '';
+    const usingThermas = result.delivery && thermasRequired(result.zone);
     const addressLabel = result.delivery ? 'Endereço de entrega' : 'Observação para retirada (opcional)';
     const addressPlaceholder = result.delivery ? 'Rua, número, bairro e ponto de referência.' : 'Ex.: horário desejado para retirar.';
+    const addressField = usingThermas ? thermasFields(result) : '<label>' + addressLabel + '<textarea name="address"' + (result.delivery ? ' required' : '') + ' placeholder="' + addressPlaceholder + '">' + esc(draft.address) + '</textarea></label>';
     const scheduleNotice = isScheduled() ? '<section class="notice scheduled-notice"><b>Encomenda para ' + esc(scheduledDateText(draft.scheduledFor)) + '.</b><br>Depois do envio, a Gelatos Lele confirmará o preparo e o pagamento pelo WhatsApp.</section>' : '';
-    return pickupNotice + '<form id="customerOrder" class="panel checkout"><h2>Seu pedido</h2>' + scheduleNotice + cartLines(result) + '<label>Seu nome<input name="customer" required value="' + esc(draft.customer) + '" placeholder="Ex.: Maria"></label><label>WhatsApp para confirmação<input name="phone" inputmode="tel" required value="' + esc(draft.phone) + '" placeholder="Ex.: 11999999999"></label><p class="small">Usaremos somente para confirmar este pedido.</p><label>Forma de receber<select name="mode">' + modes.map(mode => '<option' + (mode === draft.mode ? ' selected' : '') + '>' + esc(mode) + '</option>').join('') + '</select></label>' + zoneField + '<label>' + addressLabel + '<textarea name="address" placeholder="' + addressPlaceholder + '">' + esc(draft.address) + '</textarea></label><label>Forma de pagamento<select name="payment"><option' + (draft.payment === 'Pix' ? ' selected' : '') + '>Pix</option><option' + (draft.payment === 'Dinheiro' ? ' selected' : '') + '>Dinheiro</option><option' + (draft.payment === 'Crédito' ? ' selected' : '') + '>Crédito</option><option' + (draft.payment === 'Débito' ? ' selected' : '') + '>Débito</option></select></label>' + totalsMarkup(result) + '<button class="primary">Revisar pedido</button><p class="small">Antes de enviar, você verá itens, frete, endereço e valor total.</p></form>';
+    return pickupNotice + '<form id="customerOrder" class="panel checkout"><h2>Seu pedido</h2>' + scheduleNotice + cartLines(result) + '<label>Seu nome<input name="customer" required value="' + esc(draft.customer) + '" placeholder="Ex.: Maria"></label><label>WhatsApp para confirmação<input name="phone" inputmode="tel" required value="' + esc(draft.phone) + '" placeholder="Ex.: 11999999999"></label><p class="small">Usaremos somente para confirmar este pedido.</p><label>Forma de receber<select name="mode">' + modes.map(mode => '<option' + (mode === draft.mode ? ' selected' : '') + '>' + esc(mode) + '</option>').join('') + '</select></label>' + zoneField + addressField + '<label>Forma de pagamento<select name="payment"><option' + (draft.payment === 'Pix' ? ' selected' : '') + '>Pix</option><option' + (draft.payment === 'Dinheiro' ? ' selected' : '') + '>Dinheiro</option><option' + (draft.payment === 'Crédito' ? ' selected' : '') + '>Crédito</option><option' + (draft.payment === 'Débito' ? ' selected' : '') + '>Débito</option></select></label>' + totalsMarkup(result) + '<button class="primary">Revisar pedido</button><p class="small">Antes de enviar, você verá itens, frete, endereço e valor total.</p></form>';
   }
   function reviewForm(result) {
     const deliveryText = result.delivery ? (result.zone?.name || 'Local não informado') : 'Retirada';
-    const addressText = result.delivery ? draft.address : (catalog.pickupAddress || draft.address || 'A combinar');
+    const addressText = result.delivery ? deliveryAddress(result) : (catalog.pickupAddress || draft.address || 'A combinar');
     const orderDescription = isScheduled() ? 'Ao enviar, o que já estiver pronto será separado para você; somente os sabores restantes entram na programação de produção. A confirmação será enviada pelo WhatsApp.' : 'Ao enviar, o estoque será reservado por um tempo limitado até a Gelatos Lele aprovar o pedido.';
     const scheduling = isScheduled() ? '<dt>Encomenda para</dt><dd>' + esc(scheduledDateText(draft.scheduledFor)) + '</dd>' : '';
     return '<form id="customerOrder" class="panel checkout checkout-review"><h2>Confira seu pedido</h2><p class="small">' + orderDescription + '</p>' + cartLines(result) + '<dl class="review-details"><dt>Cliente</dt><dd>' + esc(draft.customer) + '</dd><dt>WhatsApp</dt><dd>' + esc(draft.phone) + '</dd>' + scheduling + '<dt>Recebimento</dt><dd>' + esc(draft.mode) + '</dd><dt>Local</dt><dd>' + esc(deliveryText) + '</dd><dt>Endereço</dt><dd>' + esc(addressText).replace(/\n/g, '<br>') + '</dd><dt>Pagamento</dt><dd>' + esc(draft.payment) + '</dd></dl>' + totalsMarkup(result) + '<div class="checkout-actions"><button type="button" class="outline" data-action="edit-checkout">Editar pedido</button><button class="primary">Enviar pedido</button></div></form>';
@@ -334,7 +357,7 @@
     const button = document.querySelector('#customerOrder button.primary');
     if (button) { button.disabled = true; button.textContent = 'Confirmando pedido…'; }
     try {
-      const saved = await window.GelatosCloud.placeCustomerOrder({ requestId: orderAttemptId, clientId: customerClientId(), customer: draft.customer.trim(), phone: draft.phone.trim(), mode: draft.mode, zoneId: draft.zoneId, address: draft.address.trim(), payment: draft.payment, orderKind: draft.orderKind, scheduledFor: isScheduled() ? draft.scheduledFor : '', items: result.selected.map(product => ({ productId: product.id, quantity: quantities[product.id] })) });
+      const saved = await window.GelatosCloud.placeCustomerOrder({ requestId: orderAttemptId, clientId: customerClientId(), customer: draft.customer.trim(), phone: draft.phone.trim(), mode: draft.mode, zoneId: draft.zoneId, address: deliveryAddress(result), payment: draft.payment, orderKind: draft.orderKind, scheduledFor: isScheduled() ? draft.scheduledFor : '', items: result.selected.map(product => ({ productId: product.id, quantity: quantities[product.id] })) });
       applyConfirmedStock(saved);
       confirmation(saved);
     } catch (error) {
@@ -370,6 +393,32 @@
       const id = event.target.closest('[data-product]')?.dataset.product;
       selectedProductId = String(selectedProductId) === String(id) ? '' : id;
       reviewing = false;
+      render();
+      return;
+    }
+    if (action === 'close-product') {
+      selectedProductId = '';
+      reviewing = false;
+      render();
+      return;
+    }
+    if (action === 'capture-location') {
+      if (!navigator.geolocation) { alert('Este navegador não permite usar a localização. Você pode continuar preenchendo o endereço.'); return; }
+      const button = event.target.closest('button');
+      if (button) { button.disabled = true; button.textContent = 'Obtendo localização…'; }
+      navigator.geolocation.getCurrentPosition(position => {
+        syncDraft(document.getElementById('customerOrder'));
+        draft.locationUrl = 'https://www.google.com/maps?q=' + position.coords.latitude.toFixed(6) + ',' + position.coords.longitude.toFixed(6);
+        render();
+      }, () => {
+        if (button?.isConnected) { button.disabled = false; button.textContent = 'Usar minha localização fixa'; }
+        alert('Não foi possível obter a localização. Você pode continuar preenchendo o endereço.');
+      }, { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 });
+      return;
+    }
+    if (action === 'clear-location') {
+      syncDraft(document.getElementById('customerOrder'));
+      draft.locationUrl = '';
       render();
       return;
     }

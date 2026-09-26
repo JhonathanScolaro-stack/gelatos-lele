@@ -259,6 +259,12 @@
         const legacyReserved = orderKind === 'scheduled' ? item.stockReserved === true : item.stockReserved !== false;
         const items = (Array.isArray(item.items) ? item.items : []).map(line => {
           const quantity = Math.max(0, qty(line.quantity));
+          const saleUnitPrice = Math.max(0, n(line.saleUnitPrice || (quantity > 0 ? n(line.total) / quantity : 0)));
+          const grossTotal = round(quantity * saleUnitPrice);
+          const requestedDiscount = Object.prototype.hasOwnProperty.call(line, 'discountTotal')
+            ? n(line.discountTotal)
+            : n(line.discountPerUnit) * quantity;
+          const discountTotal = round(Math.max(0, Math.min(grossTotal, requestedDiscount)));
           // Pedidos anteriores à reserva parcial não tinham estes campos.
           // Mantemos seu significado original: encomenda reservada por inteiro
           // já estava separada; as demais ainda dependiam de produção.
@@ -273,6 +279,11 @@
           return {
             ...line,
             quantity,
+            saleUnitPrice,
+            grossTotal,
+            discountTotal,
+            discountPerUnit: quantity > 0 ? round(discountTotal / quantity) : 0,
+            total: round(grossTotal - discountTotal),
             reservedQuantity,
             pendingProductionQuantity,
             reservedCost: round(reservedCost),
@@ -383,12 +394,14 @@
   let orderSubmitting = false;
   let productionSubmitting = false;
   let deferredInstall = null;
+  let rememberedBrowserScreen = '';
+  let applyingBrowserHistory = false;
   const state = {
     screen: loadLastScreen(),
     menu: '',
     notices: false,
     info: null,
-    orderLines: [{ productId: '', quantity: 1 }],
+    orderLines: [{ productId: '', quantity: 1, discountPerUnit: 0 }],
     orderDraft: null,
     resaleLines: [{ productId: '', quantity: 1, saleUnitPrice: '' }],
     resaleDraft: null,
@@ -886,6 +899,48 @@
     if (state.screen === 'settings-backup') loadServerBackups();
     refreshFromCloud(true);
   }
+  function backRouteForScreen(screen = state.screen) {
+    const parents = {
+      'order-edit': 'orders:history',
+      'supply-edit': 'stock:ingredient',
+      'ready-edit': 'stock:ready',
+      'stock-ready-manual': 'stock:ready',
+      'recipe-view': 'records:catalog',
+      'production-edit': 'production',
+      'supplier-edit': 'records:suppliers',
+      'category-edit': 'records:categories',
+      'resale-people-edit': 'resale:people',
+      'settings-restore-preview': 'settings:backup'
+    };
+    if (parents[screen]) return parents[screen];
+    if (screen === 'recipes' && (state.editRecipe || state.recipeDraft)) return 'records:catalog';
+    if (screen.startsWith('orders-')) return 'home';
+    if (screen.startsWith('stock-') || screen === 'recipes' || screen === 'production') return 'home';
+    if (screen.startsWith('finance-') || screen.startsWith('reports-') || screen.startsWith('resale-') || screen.startsWith('tools-')) return 'home';
+    if (screen.startsWith('records-')) return 'home';
+    if (screen.startsWith('settings-') && screen !== 'settings-home') return 'settings:home';
+    return '';
+  }
+  function inAppBackButton() {
+    const route = backRouteForScreen();
+    return route ? '<button type="button" class="in-app-back" data-action="go-back" data-route="' + esc(route) + '">← Voltar</button>' : '';
+  }
+  function rememberBrowserScreen() {
+    if (!window.history?.pushState || applyingBrowserHistory || rememberedBrowserScreen === state.screen) return;
+    const entry = { ...(history.state || {}), gelatosScreen: state.screen };
+    if (!rememberedBrowserScreen) history.replaceState(entry, document.title);
+    else history.pushState(entry, document.title);
+    rememberedBrowserScreen = state.screen;
+  }
+  window.addEventListener('popstate', event => {
+    const screen = event.state?.gelatosScreen;
+    if (!screen || screen === state.screen) return;
+    applyingBrowserHistory = true;
+    state.screen = screen;
+    rememberedBrowserScreen = screen;
+    render();
+    applyingBrowserHistory = false;
+  });
   function reportPreset(preset) {
     const filter = { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '' };
     const now = new Date();
@@ -924,7 +979,7 @@
       navGroup('Cadastros', 'records', [['Cardápio / sabores', 'records:catalog'], ['Categorias de geladinho', 'records:categories'], ['Ingredientes', 'stock:ingredient'], ['Insumos', 'stock:supply'], ['Fornecedores', 'records:suppliers']]) +
       navGroup('Ferramentas', 'tools', [['Preços e compras', 'tools:compare'], ['Produção possível', 'tools:capacity']]) +
       navGroup('Configurações', 'settings', [['Visão geral', 'settings:home'], ['Nuvem e sincronização', 'settings:cloud'], ['Logo do app', 'settings:appearance'], ['Mensagem e Pix', 'settings:message'], ['Cardápio do cliente', 'settings:catalog'], ['Frete e entrega', 'settings:delivery'], ['Backup', 'settings:backup']]) +
-      '</nav></aside><main>' + screen() + '</main>' + noticesPanel() + infoPanel() + '</div><div id="toast" role="status" aria-live="polite"></div>';
+      '</nav></aside><main class="screen-' + esc(state.screen) + '">' + inAppBackButton() + screen() + '</main>' + noticesPanel() + infoPanel() + '</div><div id="toast" role="status" aria-live="polite"></div>';
   }
   function heading(kicker, title, description) {
     return '<div class="screen-heading"><p>' + esc(kicker) + '</p><h1>' + esc(title) + '</h1><span>' + esc(description) + '</span></div>';
@@ -1038,15 +1093,30 @@
     const scheduled = orderKindForScreen() === 'scheduled';
     return state.orderLines.map((line, index) => {
       const choices = manualOrderOptions(line.productId, scheduled ? 'scheduled' : 'ready');
-      return '<div class="order-line"><select data-order-product="' + index + '">' + choices + '</select><input data-order-quantity="' + index + '" inputmode="decimal" value="' + esc(line.quantity) + '" aria-label="Quantidade"><button type="button" class="line-remove" data-action="remove-order-line" data-index="' + index + '" aria-label="Remover item">×</button></div>';
+      const product = scheduled ? recipeById()[line.productId] : (ready()[line.productId] || recipeById()[line.productId]);
+      const quantity = Math.max(0, n(line.quantity));
+      const unitPrice = n(product?.saleUnitPrice);
+      const discountPerUnit = Math.max(0, Math.min(unitPrice, n(line.discountPerUnit)));
+      const lineTotal = round(quantity * Math.max(0, unitPrice - discountPerUnit));
+      return '<div class="order-line"><select data-order-product="' + index + '">' + choices + '</select><input data-order-quantity="' + index + '" inputmode="decimal" value="' + esc(line.quantity) + '" aria-label="Quantidade" placeholder="Qtd."><input data-order-discount="' + index + '" inputmode="decimal" value="' + esc(discountPerUnit ? String(discountPerUnit).replace('.', ',') : '') + '" aria-label="Desconto por unidade" placeholder="Desc./un."><span class="order-line-total" data-order-line-total="' + index + '"><small>Total</small><b>' + money(lineTotal) + '</b></span><button type="button" class="line-remove" data-action="remove-order-line" data-index="' + index + '" aria-label="Remover item">×</button></div>';
     }).join('');
   }
-  function draftOrderTotal() {
+  function draftOrderBreakdown() {
     const scheduled = orderKindForScreen() === 'scheduled';
-    return round(state.orderLines.reduce((sum, line) => {
+    return state.orderLines.reduce((summary, line) => {
       const product = scheduled ? recipeById()[line.productId] : (ready()[line.productId] || recipeById()[line.productId]);
-      return sum + (product ? n(line.quantity) * n(product.saleUnitPrice) : 0);
-    }, 0));
+      if (!product) return summary;
+      const quantity = Math.max(0, n(line.quantity));
+      const gross = round(quantity * n(product.saleUnitPrice));
+      const discount = round(Math.max(0, Math.min(gross, n(line.discountPerUnit) * quantity)));
+      summary.gross += gross;
+      summary.discount += discount;
+      return summary;
+    }, { gross: 0, discount: 0, subtotal: 0 });
+  }
+  function draftOrderTotal() {
+    const summary = draftOrderBreakdown();
+    return round(summary.gross - summary.discount);
   }
   function orderDraftFromForm(form) {
     if (!form) return state.orderDraft || {};
@@ -1061,7 +1131,13 @@
       scheduledFor: f.scheduledFor?.value || '',
       deliveryMode: f.deliveryMode?.value || defaultOrderDeliveryMode(),
       zoneId: f.zoneId?.value || '',
-      address: f.address?.value || ''
+      address: f.address?.value || '',
+      thermasGleba: f.thermasGleba?.value || '',
+      thermasQuadra: f.thermasQuadra?.value || '',
+      thermasLote: f.thermasLote?.value || '',
+      thermasRua: f.thermasRua?.value || '',
+      thermasNumero: f.thermasNumero?.value || '',
+      locationUrl: f.locationUrl?.value || state.orderDraft?.locationUrl || ''
     };
   }
   function rememberOrderDraft() {
@@ -1110,7 +1186,8 @@
       const allocation = order.orderKind === 'scheduled'
         ? '<small class="allocation"><b>Separado:</b> ' + qtyText(reserved) + ' · <b>Pendente de produção:</b> ' + qtyText(pending) + '</small>'
         : '';
-      return '<li>' + qtyText(item.quantity) + ' × ' + esc(item.productName) + ' — ' + money(item.total) + allocation + '</li>';
+      const discount = n(item.discountTotal);
+      return '<li>' + qtyText(item.quantity) + ' × ' + esc(item.productName) + ' — ' + money(item.total) + (discount > 0 ? '<small class="allocation">Desconto neste sabor: ' + money(discount) + '</small>' : '') + allocation + '</li>';
     }).join('');
     const locked = order.status === 'cancelled' || order.status === 'expired';
     const pick = order.items.map((item, index) => {
@@ -1136,7 +1213,9 @@
       : '<section class="form-note"><b>Planejamento de produção:</b> nenhum item desta encomenda estava pronto. Produza os sabores pendentes e então use “Reservar itens pendentes”.</section>';
     const destination = orderDestination(order);
     const address = String(order.address || '').trim();
-    return detail(order.customer, brDate(order.date) + (order.orderKind === 'scheduled' ? ' · entrega/retirada em ' + brDate(order.scheduledFor || order.dueDate) : ' · vence ' + brDate(order.dueDate)) + ' · ' + esc(order.paymentMethod), money(order.total), orderStatus(order), '<dl><dt>WhatsApp</dt><dd>' + esc(order.phone || 'não informado') + '</dd><dt>Recebimento</dt><dd>' + esc(order.deliveryMode || order.mode || 'Retirada') + '</dd><dt>Local</dt><dd>' + esc(destination) + '</dd>' + (address ? '<dt>Endereço / observação</dt><dd>' + esc(address).replace(/\n/g, '<br>') + '</dd>' : '') + schedule + reservation + '<dt>Frete cobrado</dt><dd>' + money(order.freight) + '</dd><dt>Custo vendido</dt><dd>' + money(order.cost) + '</dd><dt>Custo de entrega</dt><dd>' + money(order.deliveryCost) + '</dd><dt>Taxa de pagamento</dt><dd>' + money(order.paymentFee) + '</dd><dt>Lucro da venda</dt><dd>' + money(order.profit) + '</dd></dl>' + checklist + '<h4>Itens</h4><ul>' + lines + '</ul><div class="details-actions">' + actions + '</div>');
+    const totalDiscount = round((order.items || []).reduce((sum, item) => sum + n(item.discountTotal), 0));
+    const locationLink = String(order.locationUrl || '').startsWith('https://www.google.com/maps') ? '<dt>Localização fixa</dt><dd><a class="fixed-location-link" href="' + esc(order.locationUrl) + '" target="_blank" rel="noopener">Abrir mapa</a></dd>' : '';
+    return detail(order.customer, brDate(order.date) + (order.orderKind === 'scheduled' ? ' · entrega/retirada em ' + brDate(order.scheduledFor || order.dueDate) : ' · vence ' + brDate(order.dueDate)) + ' · ' + esc(order.paymentMethod), money(order.total), orderStatus(order), '<dl><dt>WhatsApp</dt><dd>' + esc(order.phone || 'não informado') + '</dd><dt>Recebimento</dt><dd>' + esc(order.deliveryMode || order.mode || 'Retirada') + '</dd><dt>Local</dt><dd>' + esc(destination) + '</dd>' + (address ? '<dt>Endereço / observação</dt><dd>' + esc(address).replace(/\n/g, '<br>') + '</dd>' : '') + locationLink + schedule + reservation + (totalDiscount > 0 ? '<dt>Descontos por sabor</dt><dd>− ' + money(totalDiscount) + '</dd>' : '') + '<dt>Frete cobrado</dt><dd>' + money(order.freight) + '</dd><dt>Custo vendido</dt><dd>' + money(order.cost) + '</dd><dt>Custo de entrega</dt><dd>' + money(order.deliveryCost) + '</dd><dt>Taxa de pagamento</dt><dd>' + money(order.paymentFee) + '</dd><dt>Lucro da venda</dt><dd>' + money(order.profit) + '</dd></dl>' + checklist + '<h4>Itens</h4><ul>' + lines + '</ul><div class="details-actions">' + actions + '</div>');
   }
   function orderDeliverySummary(draft, subtotal = draftOrderTotal()) {
     const modes = orderDeliveryModes();
@@ -1155,6 +1234,36 @@
     if (editing) return '<section class="manual-order-type static"><span>Tipo do pedido</span><b>' + (scheduled ? 'Encomenda programada' : 'Pronta entrega') + '</b><small>' + (scheduled ? 'O que já estiver pronto é separado agora; só o restante fica pendente de produção.' : 'O estoque pronto é reservado ao salvar.') + '</small></section>';
     return '<section class="manual-order-type"><span>Tipo do pedido</span><div><button type="button" class="' + (!scheduled ? 'selected' : '') + '" data-action="choose-manual-order-kind" data-kind="ready"><b>Pronta entrega</b><small>Baixa os geladinhos já produzidos.</small></button><button type="button" class="' + (scheduled ? 'selected' : '') + '" data-action="choose-manual-order-kind" data-kind="scheduled"><b>Encomenda</b><small>Programa a produção para uma data futura.</small></button></div></section>';
   }
+  function thermasRequired(zone) {
+    return Boolean(zone?.requiresThermasAddress) || /thermas/i.test(String(zone?.name || ''));
+  }
+  function thermasAddress(draft) {
+    const parts = [
+      'Thermas Resort Residence',
+      'Gleba ' + String(draft.thermasGleba || '').trim(),
+      'Quadra ' + String(draft.thermasQuadra || '').trim(),
+      'Lote ' + String(draft.thermasLote || '').trim(),
+      'Rua ' + String(draft.thermasRua || '').trim(),
+      'Número ' + String(draft.thermasNumero || '').trim()
+    ];
+    const reference = String(draft.address || '').trim();
+    const fixedLocation = String(draft.locationUrl || '').trim();
+    if (reference) parts.push('Referência: ' + reference);
+    if (fixedLocation) parts.push('Localização fixa: ' + fixedLocation);
+    return parts.join('\n');
+  }
+  function thermasFields(draft, zone) {
+    if (!thermasRequired(zone)) return '';
+    const location = String(draft.locationUrl || '').trim();
+    return '<section class="thermas-address"><div><h4>Endereço no Thermas</h4><p>Preencha todos os campos para a entrega chegar sem depender de mensagens extras.</p></div><div class="form-grid two">' +
+      field('Gleba', '<select name="thermasGleba" required><option value="">Selecione</option>' + ['1', '2', '3'].map(value => '<option' + (String(draft.thermasGleba) === value ? ' selected' : '') + '>' + value + '</option>').join('') + '</select>') +
+      field('Quadra', '<input name="thermasQuadra" required value="' + esc(draft.thermasQuadra || '') + '" placeholder="Ex.: 12">') +
+      field('Lote', '<input name="thermasLote" required value="' + esc(draft.thermasLote || '') + '" placeholder="Ex.: 8">') +
+      field('Rua', '<input name="thermasRua" required value="' + esc(draft.thermasRua || '') + '" placeholder="Ex.: Rua das Palmeiras">') +
+      field('Número', '<input name="thermasNumero" required value="' + esc(draft.thermasNumero || '') + '" placeholder="Ex.: 123">') +
+      '</div><input name="locationUrl" type="hidden" value="' + esc(location) + '"><div class="location-actions"><button type="button" class="outline" data-action="capture-order-location">Usar minha localização fixa</button>' + (location ? '<a class="fixed-location-link" href="' + esc(location) + '" target="_blank" rel="noopener">Localização adicionada</a><button type="button" class="text-button" data-action="clear-order-location">Remover</button>' : '<span>Opcional: envia um ponto fixo do mapa junto do endereço.</span>') + '</div>' +
+      field('Ponto de referência (opcional)', '<textarea name="address" rows="2" placeholder="Ex.: portaria, bloco ou instrução para o entregador.">' + esc(draft.address || '') + '</textarea>') + '</section>';
+  }
   function orderFulfillmentFields(draft) {
     const summary = orderDeliverySummary(draft);
     const modes = orderDeliveryModes();
@@ -1162,25 +1271,56 @@
     const select = '<select name="deliveryMode">' + modes.map(mode => '<option' + (mode === summary.mode ? ' selected' : '') + '>' + esc(mode) + '</option>').join('') + '</select>';
     const pickup = !summary.delivery && String(data.settings.pickupAddress || '').trim() ? '<section class="form-note"><b>Retirada:</b> ' + esc(data.settings.pickupAddress).replace(/\n/g, '<br>') + '</section>' : '';
     const location = summary.delivery ? field('Local de entrega', '<select name="zoneId" required><option value="">Selecione o local</option>' + zones.map(zone => '<option value="' + esc(zone.id) + '"' + (summary.zone?.id === zone.id ? ' selected' : '') + '>' + esc(zone.name) + ' · frete ' + money(zone.fee) + '</option>').join('') + '</select>', 'Usa as cidades e bairros cadastrados em Configurações › Frete e entrega.') : '';
+    const thermas = summary.delivery && thermasRequired(summary.zone);
     const addressLabel = summary.delivery ? 'Endereço de entrega' : 'Observação para retirada';
-    const address = field(addressLabel, '<textarea name="address"' + (summary.delivery ? ' required' : '') + ' rows="3" placeholder="' + (summary.delivery ? 'Rua, número, bairro e ponto de referência.' : 'Ex.: horário desejado para retirar.') + '">' + esc(draft.address || '') + '</textarea>');
+    const address = thermas ? thermasFields(draft, summary.zone) : field(addressLabel, '<textarea name="address"' + (summary.delivery ? ' required' : '') + ' rows="3" placeholder="' + (summary.delivery ? 'Rua, número, bairro e ponto de referência.' : 'Ex.: horário desejado para retirar.') + '">' + esc(draft.address || '') + '</textarea>');
     return field('Forma de receber', select) + location + address + pickup;
   }
   function orderTotalMarkup(draft) {
     const summary = orderDeliverySummary(draft);
+    const breakdown = draftOrderBreakdown();
     const freight = !summary.delivery ? 'R$ 0,00 (retirada)' : summary.free ? 'Grátis' : summary.zone ? money(summary.freight) : 'Selecione o local';
-    return '<div class="calculation-row calculation-breakdown"><span>Subtotal dos geladinhos</span><b id="orderSubtotalPreview">' + money(summary.subtotal) + '</b><span>Frete</span><b id="orderFreightPreview">' + freight + '</b><strong>Total do pedido</strong><strong id="orderPreview">' + money(summary.total) + '</strong><small>O pedido entra no faturamento e lucro somente quando for marcado como pago.</small></div>';
+    return '<div class="calculation-row calculation-breakdown"><span>Valor dos geladinhos</span><b id="orderGrossPreview">' + money(breakdown.gross) + '</b><span>Descontos por sabor</span><b id="orderDiscountPreview">− ' + money(breakdown.discount) + '</b><span>Subtotal após descontos</span><b id="orderSubtotalPreview">' + money(summary.subtotal) + '</b><span>Frete</span><b id="orderFreightPreview">' + freight + '</b><strong>Total do pedido</strong><strong id="orderPreview">' + money(summary.total) + '</strong><small>O desconto reduz somente os sabores escolhidos; o frete é calculado sobre o subtotal após descontos. O pedido entra no faturamento e lucro somente quando for marcado como pago.</small></div>';
   }
   function updateOrderPreview() {
     const form = $('#orderForm') || $('#orderEditForm');
     if (!form) return;
     const summary = orderDeliverySummary(orderDraftFromForm(form));
+    const breakdown = draftOrderBreakdown();
+    const gross = $('#orderGrossPreview');
+    const discount = $('#orderDiscountPreview');
     const subtotal = $('#orderSubtotalPreview');
     const freight = $('#orderFreightPreview');
     const total = $('#orderPreview');
+    if (gross) gross.textContent = money(breakdown.gross);
+    if (discount) discount.textContent = '− ' + money(breakdown.discount);
+    document.querySelectorAll('[data-order-line-total]').forEach(node => {
+      const line = state.orderLines[n(node.dataset.orderLineTotal)] || {};
+      const scheduled = orderKindForScreen() === 'scheduled';
+      const product = scheduled ? recipeById()[line.productId] : (ready()[line.productId] || recipeById()[line.productId]);
+      const quantity = Math.max(0, n(line.quantity));
+      const unitPrice = n(product?.saleUnitPrice);
+      const value = round(quantity * Math.max(0, unitPrice - Math.min(unitPrice, Math.max(0, n(line.discountPerUnit)))));
+      const totalNode = node.querySelector('b');
+      if (totalNode) totalNode.textContent = money(value);
+    });
     if (subtotal) subtotal.textContent = money(summary.subtotal);
     if (freight) freight.textContent = !summary.delivery ? 'R$ 0,00 (retirada)' : summary.free ? 'Grátis' : summary.zone ? money(summary.freight) : 'Selecione o local';
     if (total) total.textContent = money(summary.total);
+  }
+  function captureOrderLocation() {
+    if (!navigator.geolocation) { toast('Este navegador não permite enviar a localização fixa. Preencha o endereço normalmente.'); return; }
+    const form = $('#orderForm') || $('#orderEditForm');
+    const button = document.querySelector('[data-action="capture-order-location"]');
+    if (button) { button.disabled = true; button.textContent = 'Obtendo localização…'; }
+    navigator.geolocation.getCurrentPosition(position => {
+      state.orderDraft = { ...orderDraftFromForm(form), locationUrl: 'https://www.google.com/maps?q=' + position.coords.latitude.toFixed(6) + ',' + position.coords.longitude.toFixed(6) };
+      toast('Localização fixa adicionada ao pedido.');
+      render({ preserveScroll: true });
+    }, () => {
+      if (button?.isConnected) { button.disabled = false; button.textContent = 'Usar minha localização fixa'; }
+      toast('Não foi possível obter a localização. Você pode continuar preenchendo o endereço.');
+    }, { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 });
   }
   function ordersScreen() {
     if (state.screen === 'orders-history') {
@@ -1192,7 +1332,7 @@
     const dateField = scheduled
       ? field('Data desejada para a encomenda', '<input name="scheduledFor" required type="date" min="' + scheduledMinDate() + '" value="' + esc(draft.scheduledFor || scheduledMinDate()) + '">', 'A data precisa ter pelo menos ' + scheduledLeadDays() + ' dias para o preparo.')
       : field('Vencimento / data esperada', '<input name="dueDate" type="date" value="' + esc(draft.dueDate || today()) + '">', 'É a data usada para avisar que o pedido ainda não foi pago.');
-    const itemText = scheduled ? 'Todos os sabores ativos aparecem organizados por categoria. Ao salvar, o app separa automaticamente o que já existe no estoque e deixa somente o saldo faltante pendente de produção.' : 'Todos os sabores ativos do cardápio aparecem organizados por categoria. Os esgotados ficam visíveis, mas não podem ser selecionados.';
+    const itemText = (scheduled ? 'Todos os sabores ativos aparecem organizados por categoria. Ao salvar, o app separa automaticamente o que já existe no estoque e deixa somente o saldo faltante pendente de produção.' : 'Todos os sabores ativos do cardápio aparecem organizados por categoria. Os esgotados ficam visíveis, mas não podem ser selecionados.') + ' Se conceder desconto, informe em “Desc./un.” somente na linha daquele sabor.';
     return '<section class="screen active">' + heading('Controle de pedidos', 'Novo pedido', 'Registre uma venda feita por telefone, WhatsApp ou presencialmente — inclusive encomendas de clientes que não usam o link.') + '<form id="orderForm" class="panel form-panel"><input type="hidden" name="orderKind" value="' + (scheduled ? 'scheduled' : 'ready') + '"><h2>Dados do cliente</h2><div class="form-grid two">' +
       field('Nome do cliente', '<input name="customer" required value="' + esc(draft.customer) + '" placeholder="Ex.: Maria">') +
       field('WhatsApp', '<input name="phone" inputmode="tel" value="' + esc(draft.phone) + '" placeholder="Ex.: 11999999999">') +
@@ -1835,8 +1975,8 @@
   }
   function deliveryZoneRows(value) {
     return String(value || '').split(/\r?\n/).map(line => {
-      const [city, fee = '', deliveryCost = ''] = line.split('|');
-      return { city: String(city || '').trim(), fee: String(fee || '').trim(), deliveryCost: String(deliveryCost || '').trim() };
+      const [city, fee = '', deliveryCost = '', rule = ''] = line.split('|');
+      return { city: String(city || '').trim(), fee: String(fee || '').trim(), deliveryCost: String(deliveryCost || '').trim(), requiresThermasAddress: String(rule || '').trim().toLocaleLowerCase('pt-BR') === 'thermas' || /thermas/i.test(String(city || '')) };
     }).filter(row => row.city || row.fee || row.deliveryCost);
   }
   function defaultDeliveryDraft() {
@@ -1865,13 +2005,14 @@
       zones: Array.from(form.querySelectorAll('[data-delivery-zone]')).map(row => ({
         city: row.querySelector('[data-zone-city]')?.value.trim() || '',
         fee: row.querySelector('[data-zone-fee]')?.value.trim() || '',
-        deliveryCost: row.querySelector('[data-zone-cost]')?.value.trim() || ''
+        deliveryCost: row.querySelector('[data-zone-cost]')?.value.trim() || '',
+        requiresThermasAddress: Boolean(row.querySelector('[data-zone-thermas]')?.checked)
       }))
     };
   }
   function deliveryZoneFields(draft) {
-    const rows = draft.zones.length ? draft.zones : [{ city: '', fee: '', deliveryCost: '' }];
-    return '<section class="delivery-zones"><h2>Locais, frete e custo da entrega</h2><p class="form-note">O frete é o valor que o cliente paga. O custo é o que a empresa paga ao entregador; deixe em branco se não houver custo fixo.</p>' + rows.map((row, index) => '<div class="delivery-zone-row" data-delivery-zone><label>Cidade ou bairro<input data-zone-city="' + index + '" value="' + esc(row.city) + '" placeholder="Ex.: Águas do Centro"></label><label>Frete cobrado (R$)<input data-zone-fee="' + index + '" inputmode="decimal" value="' + esc(row.fee) + '" placeholder="Ex.: 5,00"></label><label>Custo da entrega (R$)<input data-zone-cost="' + index + '" inputmode="decimal" value="' + esc(row.deliveryCost) + '" placeholder="Ex.: 3,00"></label><button class="line-remove" type="button" data-action="remove-delivery-zone" data-index="' + index + '" aria-label="Remover local">×</button></div>').join('') + '<button class="outline full" type="button" data-action="add-delivery-zone">+ Adicionar cidade ou bairro</button></section>';
+    const rows = draft.zones.length ? draft.zones : [{ city: '', fee: '', deliveryCost: '', requiresThermasAddress: false }];
+    return '<section class="delivery-zones"><h2>Locais, frete e custo da entrega</h2><p class="form-note">O frete é o valor que o cliente paga. O custo é o que a empresa paga ao entregador; deixe em branco se não houver custo fixo.</p>' + rows.map((row, index) => '<div class="delivery-zone-row" data-delivery-zone><label>Cidade ou bairro<input data-zone-city="' + index + '" value="' + esc(row.city) + '" placeholder="Ex.: Thermas ou Águas do Centro"></label><label>Frete cobrado (R$)<input data-zone-fee="' + index + '" inputmode="decimal" value="' + esc(row.fee) + '" placeholder="Ex.: 5,00"></label><label>Custo da entrega (R$)<input data-zone-cost="' + index + '" inputmode="decimal" value="' + esc(row.deliveryCost) + '" placeholder="Ex.: 3,00"></label><label class="zone-rule"><input type="checkbox" data-zone-thermas="' + index + '"' + (row.requiresThermasAddress ? ' checked' : '') + '> Pedir Gleba, quadra, lote, rua e nº</label><button class="line-remove" type="button" data-action="remove-delivery-zone" data-index="' + index + '" aria-label="Remover local">×</button></div>').join('') + '<button class="outline full" type="button" data-action="add-delivery-zone">+ Adicionar cidade ou bairro</button></section>';
   }
   function settingsScreen() {
     const section = state.screen.replace('settings-', '');
@@ -1965,8 +2106,9 @@
   }
   function deliveryZones(value) {
     return String(value || '').split(/\r?\n/).map(line => {
-      const [name, feeText = '', costText = ''] = line.split('|');
-      return { id: String(name || '').trim().toLocaleLowerCase('pt-BR').replace(/[^a-z0-9]+/g, '-'), name: String(name || '').trim(), fee: Math.max(0, n(feeText)), cost: Math.max(0, n(costText)) };
+      const [name, feeText = '', costText = '', rule = ''] = line.split('|');
+      const zoneName = String(name || '').trim();
+      return { id: zoneName.toLocaleLowerCase('pt-BR').replace(/[^a-z0-9]+/g, '-'), name: zoneName, fee: Math.max(0, n(feeText)), cost: Math.max(0, n(costText)), requiresThermasAddress: String(rule || '').trim().toLocaleLowerCase('pt-BR') === 'thermas' || /thermas/i.test(zoneName) };
     }).filter(zone => zone.name);
   }
   function catalogPayload() {
@@ -2002,7 +2144,7 @@
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=50';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=51';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -2011,7 +2153,7 @@
   }
   function managementCatalogLink() {
     const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    return base + 'customer.html?v=50&gestao=1';
+    return base + 'customer.html?v=51&gestao=1';
   }
   function noticesPanel() {
     if (!state.notices) return '';
@@ -2058,6 +2200,7 @@
   }
   function render(options = {}) {
     const scrollTop = options.preserveScroll ? window.scrollY : 0;
+    rememberBrowserScreen();
     refreshNotices();
     saveLocal();
     rememberScreen();
@@ -2080,12 +2223,25 @@
     const scheduled = orderKindForScreen() === 'scheduled';
     const grouped = {};
     state.orderLines.forEach(line => {
-      if (line.productId && n(line.quantity) > 0) grouped[line.productId] = qty((grouped[line.productId] || 0) + n(line.quantity));
+      if (!line.productId || !(n(line.quantity) > 0)) return;
+      const product = scheduled ? recipeById()[line.productId] : (ready()[line.productId] || recipeById()[line.productId]);
+      if (!product) return;
+      const quantity = qty(n(line.quantity));
+      const gross = round(quantity * n(product.saleUnitPrice));
+      const discountTotal = round(Math.max(0, Math.min(gross, n(line.discountPerUnit) * quantity)));
+      const previous = grouped[line.productId] || { quantity: 0, discountTotal: 0 };
+      previous.quantity = qty(previous.quantity + quantity);
+      previous.discountTotal = round(previous.discountTotal + discountTotal);
+      grouped[line.productId] = previous;
     });
-    return Object.entries(grouped).map(([productId, quantity]) => {
+    return Object.entries(grouped).map(([productId, groupedLine]) => {
       const product = recipeById()[productId] || ready()[productId];
       const category = categoryFor(product);
-      return { productId, quantity, saleUnitPrice: n(scheduled ? recipeById()[productId]?.saleUnitPrice : (ready()[productId]?.saleUnitPrice || recipeById()[productId]?.saleUnitPrice)), productCategoryId: category.id, productType: category.name };
+      const quantity = qty(groupedLine.quantity);
+      const saleUnitPrice = n(scheduled ? recipeById()[productId]?.saleUnitPrice : (ready()[productId]?.saleUnitPrice || recipeById()[productId]?.saleUnitPrice));
+      const grossTotal = round(quantity * saleUnitPrice);
+      const discountTotal = round(Math.max(0, Math.min(grossTotal, groupedLine.discountTotal)));
+      return { productId, quantity, saleUnitPrice, grossTotal, discountTotal, discountPerUnit: quantity > 0 ? round(discountTotal / quantity) : 0, productCategoryId: category.id, productType: category.name };
     });
   }
   function scheduledPendingPreview(lines) {
@@ -2101,6 +2257,9 @@
       if (!recipe || recipe.active === false || !(n(line.quantity) > 0)) throw new Error('Um sabor da encomenda não está mais disponível no cardápio.');
       const quantity = qty(line.quantity);
       const saleUnitPrice = n(line.saleUnitPrice || recipe.saleUnitPrice);
+      const grossTotal = round(quantity * saleUnitPrice);
+      const requestedDiscount = n(line.discountTotal ?? (n(line.discountPerUnit) * quantity));
+      const discountTotal = round(Math.max(0, Math.min(grossTotal, requestedDiscount)));
       const estimatedUnitCost = fullRecipeCost(recipe).unitCost;
       const product = ready()[line.productId];
       const reserved = Math.min(quantity, Math.max(0, qty(product?.quantity)));
@@ -2117,6 +2276,9 @@
         productName: recipe.name,
         quantity,
         saleUnitPrice,
+        grossTotal,
+        discountTotal,
+        discountPerUnit: quantity > 0 ? round(discountTotal / quantity) : 0,
         reservedQuantity: reserved,
         pendingProductionQuantity: pending,
         reservedUnitCost: round(reservedUnitCost),
@@ -2124,7 +2286,7 @@
         pendingUnitCost: round(estimatedUnitCost),
         pendingCost,
         unitCost: quantity > 0 ? round((reservedCost + pendingCost) / quantity) : 0,
-        total: round(quantity * saleUnitPrice),
+        total: round(grossTotal - discountTotal),
         cost: round(reservedCost + pendingCost),
         picked: false
       };
@@ -2230,8 +2392,11 @@
     }
     const summary = orderDeliverySummary(draft, subtotal);
     if (summary.delivery && !summary.zone) throw new Error('Escolha o local de entrega para calcular o frete.');
-    if (summary.delivery && String(draft.address || '').trim().length < 5) throw new Error('Informe o endereço de entrega completo.');
-    return { kind, scheduledFor, dueDate: schedule ? scheduledFor : (draft.dueDate || today()), deliveryMode: summary.mode, zoneId: summary.zone?.id || '', deliveryZone: summary.zone?.name || '', address: String(draft.address || '').trim(), freight: summary.freight, deliveryCost: summary.deliveryCost, total: summary.total };
+    const requiresThermas = summary.delivery && thermasRequired(summary.zone);
+    const thermasComplete = ['thermasGleba', 'thermasQuadra', 'thermasLote', 'thermasRua', 'thermasNumero'].every(key => String(draft[key] || '').trim());
+    if (requiresThermas && (!['1', '2', '3'].includes(String(draft.thermasGleba || '')) || !thermasComplete)) throw new Error('No Thermas, informe Gleba (1, 2 ou 3), quadra, lote, rua e número.');
+    if (summary.delivery && !requiresThermas && String(draft.address || '').trim().length < 5) throw new Error('Informe o endereço de entrega completo.');
+    return { kind, scheduledFor, dueDate: schedule ? scheduledFor : (draft.dueDate || today()), deliveryMode: summary.mode, zoneId: summary.zone?.id || '', deliveryZone: summary.zone?.name || '', address: summary.delivery && requiresThermas ? thermasAddress(draft) : String(draft.address || '').trim(), thermasGleba: requiresThermas ? String(draft.thermasGleba) : '', thermasQuadra: requiresThermas ? String(draft.thermasQuadra) : '', thermasLote: requiresThermas ? String(draft.thermasLote) : '', thermasRua: requiresThermas ? String(draft.thermasRua) : '', thermasNumero: requiresThermas ? String(draft.thermasNumero) : '', locationUrl: requiresThermas ? String(draft.locationUrl || '').trim() : '', freight: summary.freight, deliveryCost: summary.deliveryCost, total: summary.total };
   }
   async function submitOrder(form, editing = false) {
     if (orderSubmitting) return;
@@ -2273,11 +2438,15 @@
         }
         const total = round(result.revenue + meta.freight);
         const paymentFee = paymentFeeFor(total, f.payment.value);
+        const grossSubtotal = round(result.lines.reduce((sum, line) => sum + n(line.grossTotal ?? (n(line.quantity) * n(line.saleUnitPrice))), 0));
+        const discountTotal = round(result.lines.reduce((sum, line) => sum + n(line.discountTotal), 0));
         const saved = {
           customer,
           phone: f.phone.value.trim(),
           items: result.lines.map(line => ({ ...line, picked: false })),
           subtotal: result.revenue,
+          grossSubtotal,
+          discountTotal,
           freight: meta.freight,
           total,
           cost: result.cost,
@@ -2295,13 +2464,19 @@
           deliveryZone: meta.deliveryZone,
           zoneId: meta.zoneId,
           address: meta.address,
+          thermasGleba: meta.thermasGleba,
+          thermasQuadra: meta.thermasQuadra,
+          thermasLote: meta.thermasLote,
+          thermasRua: meta.thermasRua,
+          thermasNumero: meta.thermasNumero,
+          locationUrl: meta.locationUrl,
           source: old?.source || 'pedido-manual',
           paidAt: old?.status === 'paid' ? old.paidAt : ''
         };
         if (old) Object.assign(old, saved);
         else data.orders.unshift({ id: uid(), ...saved });
         state.editOrder = '';
-        state.orderLines = [{ productId: '', quantity: 1 }];
+        state.orderLines = [{ productId: '', quantity: 1, discountPerUnit: 0 }];
         state.orderDraft = null;
         if (meta.kind === 'scheduled') {
           const reservedText = qtyText(result.reservedQuantity || orderReservedQuantity(old));
@@ -2845,7 +3020,7 @@
     Object.assign(data.settings, {
       deliveryModes: draft.deliveryModes.trim() || 'Retirada,Entrega',
       pickupAddress: draft.pickupAddress.trim(),
-      deliveryZones: zones.map(zone => zone.city.trim() + ' | ' + n(zone.fee).toFixed(2).replace('.', ',') + ' | ' + n(zone.deliveryCost).toFixed(2).replace('.', ',')).join('\n'),
+      deliveryZones: zones.map(zone => zone.city.trim() + ' | ' + n(zone.fee).toFixed(2).replace('.', ',') + ' | ' + n(zone.deliveryCost).toFixed(2).replace('.', ',') + ' | ' + (zone.requiresThermasAddress ? 'thermas' : '')).join('\n'),
       freeDeliveryMinValue: draft.freeDeliveryMinValue.trim(),
       freeDeliveryMinItems: draft.freeDeliveryMinItems.trim(),
       creditFeePercent: draft.creditFeePercent.trim(),
@@ -3458,6 +3633,9 @@
     const id = actionNode.dataset.id;
     if (action === 'open-menu') { document.body.classList.add('drawer-open'); return; }
     if (action === 'close-menu') { document.body.classList.remove('drawer-open'); return; }
+    if (action === 'go-back') { navigate(actionNode.dataset.route || 'home'); return; }
+    if (action === 'capture-order-location') { captureOrderLocation(); return; }
+    if (action === 'clear-order-location') { state.orderDraft = { ...orderDraftFromForm($('#orderForm') || $('#orderEditForm')), locationUrl: '' }; render({ preserveScroll: true }); return; }
     if (action === 'cloud-auth-reset') { state.cloudAuthView = 'reset'; state.cloudAuthError = ''; render({ preserveScroll: true }); return; }
     if (action === 'cloud-auth-signin') { state.cloudAuthView = 'signin'; state.cloudAuthError = ''; render({ preserveScroll: true }); return; }
     if (action === 'open-notices') { state.notices = true; render(); return; }
@@ -3472,7 +3650,7 @@
     if (action === 'close-info') { state.info = null; render(); return; }
     if (action === 'add-delivery-zone') {
       state.deliveryDraft = deliveryDraftFromForm($('#deliverySettingsForm'));
-      state.deliveryDraft.zones.push({ city: '', fee: '', deliveryCost: '' });
+      state.deliveryDraft.zones.push({ city: '', fee: '', deliveryCost: '', requiresThermasAddress: false });
       const index = state.deliveryDraft.zones.length - 1;
       render({ preserveScroll: true, focusSelector: '[data-zone-city="' + index + '"]' });
       return;
@@ -3498,8 +3676,8 @@
       render({ preserveScroll: true });
       return;
     }
-    if (action === 'add-order-line') { rememberOrderDraft(); state.orderLines.push({ productId: '', quantity: 1 }); render({ preserveScroll: true }); return; }
-    if (action === 'remove-order-line') { state.orderLines.splice(n(actionNode.dataset.index), 1); if (!state.orderLines.length) state.orderLines.push({ productId: '', quantity: 1 }); render(); return; }
+    if (action === 'add-order-line') { rememberOrderDraft(); state.orderLines.push({ productId: '', quantity: 1, discountPerUnit: 0 }); render({ preserveScroll: true }); return; }
+    if (action === 'remove-order-line') { state.orderLines.splice(n(actionNode.dataset.index), 1); if (!state.orderLines.length) state.orderLines.push({ productId: '', quantity: 1, discountPerUnit: 0 }); render(); return; }
     if (action === 'new-reseller') { state.editReseller = ''; state.screen = 'resale-people-edit'; render(); return; }
     if (action === 'edit-reseller') { if (resellerById()[id]) { state.editReseller = id; state.screen = 'resale-people-edit'; render(); } return; }
     if (action === 'delete-reseller') { deleteReseller(id); return; }
@@ -3508,7 +3686,7 @@
     if (action === 'edit-order') {
       const order = data.orders.find(item => String(item.id) === String(id));
       const matchingZone = deliveryZones(data.settings.deliveryZones).find(zone => zone.name === String(order?.deliveryZone || ''));
-      if (order) { state.editOrder = id; state.orderLines = order.items.map(line => ({ productId: line.productId, quantity: line.quantity })); state.orderDraft = { customer: order.customer, phone: order.phone || '', payment: order.paymentMethod, date: order.date, dueDate: order.dueDate, orderKind: order.orderKind, scheduledFor: order.scheduledFor || order.dueDate, deliveryMode: order.deliveryMode || order.mode || defaultOrderDeliveryMode(), zoneId: order.zoneId || matchingZone?.id || '', address: order.address || '' }; state.screen = 'order-edit'; render(); }
+      if (order) { state.editOrder = id; state.orderLines = order.items.map(line => ({ productId: line.productId, quantity: line.quantity, discountPerUnit: n(line.discountPerUnit) })); state.orderDraft = { customer: order.customer, phone: order.phone || '', payment: order.paymentMethod, date: order.date, dueDate: order.dueDate, orderKind: order.orderKind, scheduledFor: order.scheduledFor || order.dueDate, deliveryMode: order.deliveryMode || order.mode || defaultOrderDeliveryMode(), zoneId: order.zoneId || matchingZone?.id || '', address: order.address || '', thermasGleba: order.thermasGleba || '', thermasQuadra: order.thermasQuadra || '', thermasLote: order.thermasLote || '', thermasRua: order.thermasRua || '', thermasNumero: order.thermasNumero || '', locationUrl: order.locationUrl || '' }; state.screen = 'order-edit'; render(); }
       return;
     }
     if (action === 'approve-order') { approveOrder(id); return; }
@@ -3623,6 +3801,11 @@
       updateOrderPreview();
       return;
     }
+    if (target.matches('[data-order-discount]')) {
+      state.orderLines[n(target.dataset.orderDiscount)].discountPerUnit = target.value;
+      updateOrderPreview();
+      return;
+    }
     if (target.closest('#orderForm, #orderEditForm') && ['deliveryMode', 'zoneId'].includes(target.name)) {
       rememberOrderDraft();
       render({ preserveScroll: true });
@@ -3666,6 +3849,10 @@
     if (target.closest('#resaleForm') && ['note'].includes(target.name)) state.resaleDraft = resaleDraftFromForm();
     if (target.matches('[data-order-quantity]')) {
       state.orderLines[n(target.dataset.orderQuantity)].quantity = target.value;
+      updateOrderPreview();
+    }
+    if (target.matches('[data-order-discount]')) {
+      state.orderLines[n(target.dataset.orderDiscount)].discountPerUnit = target.value;
       updateOrderPreview();
     }
     if (target.matches('[data-recipe-quantity]')) { state.recipeLines[n(target.dataset.recipeQuantity)].quantity = target.value; updateRecipePreview(); }
@@ -3737,7 +3924,7 @@
     const updateButton = $('#appUpdate');
     const showUpdate = () => { if (updateButton) updateButton.hidden = false; };
     updateButton?.addEventListener('click', () => location.reload());
-    navigator.serviceWorker.register('./service-worker.js?v=50').then(registration => {
+    navigator.serviceWorker.register('./service-worker.js?v=51').then(registration => {
       // Solicita a checagem mesmo em quem abre o atalho instalado há semanas.
       registration.update().catch(() => {});
       if (registration.waiting) showUpdate();

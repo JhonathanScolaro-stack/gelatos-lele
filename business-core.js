@@ -124,7 +124,12 @@ window.GelatosCore = (() => {
       const quantity = Number(item.quantity);
       const saleUnitPrice = money(item.saleUnitPrice);
       if (!product || !(quantity > 0) || product.quantity < quantity) throw new Error('Estoque insuficiente no pedido.');
-      const line = { ...item, productName: product.name, quantity, saleUnitPrice, unitCost: money(product.unitCost), total: money(quantity * saleUnitPrice), cost: money(quantity * product.unitCost) };
+      const grossTotal = money(quantity * saleUnitPrice);
+      // O desconto pertence ao sabor, nunca ao pedido inteiro. Limitá-lo ao
+      // valor da própria linha evita total negativo por erro de digitação.
+      const requestedDiscount = Number(item.discountTotal ?? (Number(item.discountPerUnit || 0) * quantity));
+      const discountTotal = money(Math.max(0, Math.min(grossTotal, Number.isFinite(requestedDiscount) ? requestedDiscount : 0)));
+      const line = { ...item, productName: product.name, quantity, saleUnitPrice, grossTotal, discountTotal, discountPerUnit: quantity > 0 ? money(discountTotal / quantity) : 0, unitCost: money(product.unitCost), total: money(grossTotal - discountTotal), cost: money(quantity * product.unitCost) };
       cost += line.cost; revenue += line.total;
       return line;
     });

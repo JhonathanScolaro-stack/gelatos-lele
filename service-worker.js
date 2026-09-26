@@ -1,10 +1,11 @@
-const CACHE = 'gelatos-lele-company-v50-egress-guard';
+const CACHE = 'gelatos-lele-company-v51-thermas-discounts';
 const ASSETS = [
   './',
   './index.html',
   './styles-v11.css',
   './styles-v18.css',
   './styles-v32.css',
+  './styles-v51.css',
   './business-core.js',
   './cloud-config.js',
   './cloud-sync.js',
@@ -18,6 +19,7 @@ const ASSETS = [
   './customer-v31.css',
   './customer-v32.css',
   './customer-v36.css',
+  './customer-v51.css',
   './customer.js'
 ];
 self.addEventListener('install', event => {
