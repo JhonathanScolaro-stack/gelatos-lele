@@ -19,7 +19,7 @@ as $$
       'name', trim(split_part(line, '|', 1)),
       'fee', public.gelatos_to_number(split_part(line, '|', 2)),
       'cost', public.gelatos_to_number(split_part(line, '|', 3)),
-      'requiresThermasAddress', lower(trim(split_part(line, '|', 4))) in ('thermas', 'sim', 'true', '1') or lower(trim(split_part(line, '|', 1))) like '%thermas%'
+      'requiresThermasAddress', lower(trim(split_part(line, '|', 4))) in ('thermas', 'sim', 'true', '1') or lower(trim(split_part(line, '|', 1))) like '%thermas%' or lower(trim(split_part(line, '|', 1))) like '%santa bárbara resort%'
     ) order by trim(split_part(line, '|', 1))), '[]'::jsonb) as items
     from settings, regexp_split_to_table(coalesce(settings.item->>'deliveryZones', ''), E'\\r?\\n') line
     where trim(split_part(line, '|', 1)) <> ''

@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#d85e78">
   <meta name="description" content="Cardápio Gelatos Lele">
-  <link rel="stylesheet" href="customer.css?v=51">
-  <link rel="stylesheet" href="customer-v31.css?v=51">
-  <link rel="stylesheet" href="customer-v32.css?v=51">
-  <link rel="stylesheet" href="customer-v36.css?v=51">
-  <link rel="stylesheet" href="customer-v51.css?v=51">
+  <link rel="stylesheet" href="customer.css?v=52">
+  <link rel="stylesheet" href="customer-v31.css?v=52">
+  <link rel="stylesheet" href="customer-v32.css?v=52">
+  <link rel="stylesheet" href="customer-v36.css?v=52">
+  <link rel="stylesheet" href="customer-v51.css?v=52">
   <title>Cardápio Gelatos Lele</title>
 </head>
 <body>
@@ -20,11 +20,11 @@
     // permaneçam presos aos arquivos de uma versão anterior do cardápio.
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('./service-worker.js?v=51').then(function (registration) {
+        navigator.serviceWorker.register('./service-worker.js?v=52').then(function (registration) {
           registration.update();
           navigator.serviceWorker.addEventListener('controllerchange', function () {
-            if (sessionStorage.getItem('gelatos-catalog-reloaded-v51')) return;
-            sessionStorage.setItem('gelatos-catalog-reloaded-v51', '1');
+            if (sessionStorage.getItem('gelatos-catalog-reloaded-v52')) return;
+            sessionStorage.setItem('gelatos-catalog-reloaded-v52', '1');
             window.location.reload();
           }, { once: true });
         }).catch(function () {
@@ -33,8 +33,8 @@
       });
     }
   </script>
-  <script src="cloud-config.js?v=51"></script>
-  <script src="cloud-sync.js?v=51"></script>
-  <script src="customer.js?v=51"></script>
+  <script src="cloud-config.js?v=52"></script>
+  <script src="cloud-sync.js?v=52"></script>
+  <script src="customer.js?v=52"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v51-thermas-discounts';
+const CACHE = 'gelatos-lele-company-v52-thermas-resort';
 const ASSETS = [
   './',
   './index.html',

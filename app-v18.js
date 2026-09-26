@@ -1235,7 +1235,7 @@
     return '<section class="manual-order-type"><span>Tipo do pedido</span><div><button type="button" class="' + (!scheduled ? 'selected' : '') + '" data-action="choose-manual-order-kind" data-kind="ready"><b>Pronta entrega</b><small>Baixa os geladinhos já produzidos.</small></button><button type="button" class="' + (scheduled ? 'selected' : '') + '" data-action="choose-manual-order-kind" data-kind="scheduled"><b>Encomenda</b><small>Programa a produção para uma data futura.</small></button></div></section>';
   }
   function thermasRequired(zone) {
-    return Boolean(zone?.requiresThermasAddress) || /thermas/i.test(String(zone?.name || ''));
+    return Boolean(zone?.requiresThermasAddress) || /(thermas|santa\s*b[aá]rbara\s*resort)/i.test(String(zone?.name || ''));
   }
   function thermasAddress(draft) {
     const parts = [
@@ -1976,7 +1976,7 @@
   function deliveryZoneRows(value) {
     return String(value || '').split(/\r?\n/).map(line => {
       const [city, fee = '', deliveryCost = '', rule = ''] = line.split('|');
-      return { city: String(city || '').trim(), fee: String(fee || '').trim(), deliveryCost: String(deliveryCost || '').trim(), requiresThermasAddress: String(rule || '').trim().toLocaleLowerCase('pt-BR') === 'thermas' || /thermas/i.test(String(city || '')) };
+      return { city: String(city || '').trim(), fee: String(fee || '').trim(), deliveryCost: String(deliveryCost || '').trim(), requiresThermasAddress: String(rule || '').trim().toLocaleLowerCase('pt-BR') === 'thermas' || /(thermas|santa\s*b[aá]rbara\s*resort)/i.test(String(city || '')) };
     }).filter(row => row.city || row.fee || row.deliveryCost);
   }
   function defaultDeliveryDraft() {
@@ -2108,7 +2108,7 @@
     return String(value || '').split(/\r?\n/).map(line => {
       const [name, feeText = '', costText = '', rule = ''] = line.split('|');
       const zoneName = String(name || '').trim();
-      return { id: zoneName.toLocaleLowerCase('pt-BR').replace(/[^a-z0-9]+/g, '-'), name: zoneName, fee: Math.max(0, n(feeText)), cost: Math.max(0, n(costText)), requiresThermasAddress: String(rule || '').trim().toLocaleLowerCase('pt-BR') === 'thermas' || /thermas/i.test(zoneName) };
+      return { id: zoneName.toLocaleLowerCase('pt-BR').replace(/[^a-z0-9]+/g, '-'), name: zoneName, fee: Math.max(0, n(feeText)), cost: Math.max(0, n(costText)), requiresThermasAddress: String(rule || '').trim().toLocaleLowerCase('pt-BR') === 'thermas' || /(thermas|santa\s*b[aá]rbara\s*resort)/i.test(zoneName) };
     }).filter(zone => zone.name);
   }
   function catalogPayload() {

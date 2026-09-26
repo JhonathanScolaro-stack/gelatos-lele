@@ -167,7 +167,7 @@
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return '—';
     return new Date(value + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' });
   }
-  function deliveryZones() { return (Array.isArray(catalog?.deliveryZones) ? catalog.deliveryZones : []).map((zone, index) => { const name = String(zone.name || '').trim(); return { id: String(zone.id || index), name, fee: Math.max(0, num(zone.fee)), requiresThermasAddress: Boolean(zone.requiresThermasAddress) || /thermas/i.test(name) }; }).filter(zone => zone.name); }
+  function deliveryZones() { return (Array.isArray(catalog?.deliveryZones) ? catalog.deliveryZones : []).map((zone, index) => { const name = String(zone.name || '').trim(); return { id: String(zone.id || index), name, fee: Math.max(0, num(zone.fee)), requiresThermasAddress: Boolean(zone.requiresThermasAddress) || /(thermas|santa\s*b[aá]rbara\s*resort)/i.test(name) }; }).filter(zone => zone.name); }
   function selectedProducts() { return catalog.products.filter(product => quantities[product.id] > 0); }
   function catalogCategories() {
     const entries = Array.isArray(catalog?.categories) ? catalog.categories : [];
@@ -208,7 +208,7 @@
     });
   }
   function isDelivery() { return String(draft.mode || '').toLocaleLowerCase('pt-BR').includes('entrega'); }
-  function thermasRequired(zone) { return Boolean(zone?.requiresThermasAddress) || /thermas/i.test(String(zone?.name || '')); }
+  function thermasRequired(zone) { return Boolean(zone?.requiresThermasAddress) || /(thermas|santa\s*b[aá]rbara\s*resort)/i.test(String(zone?.name || '')); }
   function deliveryAddress(result = orderTotals()) {
     if (!result.delivery || !thermasRequired(result.zone)) return draft.address.trim();
     const fields = ['Thermas Resort Residence', 'Gleba ' + draft.thermasGleba, 'Quadra ' + draft.thermasQuadra, 'Lote ' + draft.thermasLote, 'Rua ' + draft.thermasRua, 'Número ' + draft.thermasNumero];
