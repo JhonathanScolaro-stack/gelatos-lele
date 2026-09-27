@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v53-customer-whatsapp';
+const CACHE = 'gelatos-lele-company-v54-whatsapp-icon';
 const ASSETS = [
   './',
   './index.html',

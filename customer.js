@@ -28,7 +28,7 @@
     const type = productType(value);
     return type === 'Água' ? 'agua' : type === 'Leite' ? 'leite' : 'gourmet';
   };
-  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=53';
+  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=54';
   const openedFromManagement = () => new URLSearchParams(location.search).get('gestao') === '1';
   const ORDER_ATTEMPT_KEY = 'gelatos-lele-customer-order-attempt-v1';
   const CUSTOMER_CLIENT_KEY = 'gelatos-lele-customer-client-v1';
@@ -179,7 +179,7 @@
     const phone = businessWhatsAppNumber();
     if (!phone) return '';
     const text = encodeURIComponent('Olá! Vim pelo cardápio da ' + String(catalog?.brand || 'Gelatos Lele') + ' e gostaria de tirar uma dúvida.');
-    return '<a class="catalog-whatsapp" href="https://wa.me/' + phone + '?text=' + text + '" target="_blank" rel="noopener" aria-label="Falar com a Gelatos Lele no WhatsApp"><span aria-hidden="true">⌕</span><b>WhatsApp</b></a>';
+    return '<a class="catalog-whatsapp" href="https://wa.me/' + phone + '?text=' + text + '" target="_blank" rel="noopener" aria-label="Falar com a Gelatos Lele no WhatsApp" title="Falar no WhatsApp"><svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d="M16 4.5a11.2 11.2 0 0 0-9.6 17l-1.3 5.9 6-1.5A11.2 11.2 0 1 0 16 4.5Zm0 20.4a9.1 9.1 0 0 1-4.35-1.1l-.42-.23-3.55.89.91-3.47-.27-.45A9.1 9.1 0 1 1 16 24.9Zm5-6.8c-.28-.14-1.65-.81-1.9-.9-.26-.1-.44-.14-.63.14-.18.27-.72.9-.88 1.08-.16.19-.32.21-.6.07-1.64-.81-2.72-1.45-3.8-3.29-.28-.48.28-.45.8-1.5.1-.2.05-.37-.02-.51-.07-.14-.63-1.52-.86-2.08-.23-.55-.47-.48-.64-.49h-.55c-.2 0-.51.07-.78.37-.27.3-1.03 1.01-1.03 2.46s1.06 2.85 1.2 3.05c.15.2 2.09 3.2 5.08 4.49.71.31 1.26.49 1.69.62.71.22 1.35.19 1.86.11.57-.09 1.65-.67 1.89-1.32.23-.65.23-1.21.16-1.32-.06-.12-.25-.19-.53-.33Z" fill="currentColor"/></svg></a>';
   }
   function selectedProducts() { return catalog.products.filter(product => quantities[product.id] > 0); }
   function catalogCategories() {
