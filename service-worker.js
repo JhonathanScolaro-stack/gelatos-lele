@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v52-thermas-resort';
+const CACHE = 'gelatos-lele-company-v53-customer-whatsapp';
 const ASSETS = [
   './',
   './index.html',
@@ -20,6 +20,7 @@ const ASSETS = [
   './customer-v32.css',
   './customer-v36.css',
   './customer-v51.css',
+  './customer-v53.css',
   './customer.js'
 ];
 self.addEventListener('install', event => {
