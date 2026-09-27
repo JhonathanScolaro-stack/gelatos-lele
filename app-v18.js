@@ -1214,7 +1214,9 @@
     const destination = orderDestination(order);
     const address = String(order.address || '').trim();
     const totalDiscount = round((order.items || []).reduce((sum, item) => sum + n(item.discountTotal), 0));
-    const locationLink = String(order.locationUrl || '').startsWith('https://www.google.com/maps') ? '<dt>Localização fixa</dt><dd><a class="fixed-location-link" href="' + esc(order.locationUrl) + '" target="_blank" rel="noopener">Abrir mapa</a></dd>' : '';
+    const addressLocation = String(order.address || '').match(/https:\/\/www\.google\.com\/maps\?q=[^\s<]+/i)?.[0] || '';
+    const locationUrl = String(order.locationUrl || '').startsWith('https://www.google.com/maps') ? String(order.locationUrl) : addressLocation;
+    const locationLink = locationUrl ? '<dt>Localização fixa</dt><dd><a class="fixed-location-link" href="' + esc(locationUrl) + '" target="_blank" rel="noopener">Abrir mapa</a></dd>' : '';
     return detail(order.customer, brDate(order.date) + (order.orderKind === 'scheduled' ? ' · entrega/retirada em ' + brDate(order.scheduledFor || order.dueDate) : ' · vence ' + brDate(order.dueDate)) + ' · ' + esc(order.paymentMethod), money(order.total), orderStatus(order), '<dl><dt>WhatsApp</dt><dd>' + esc(order.phone || 'não informado') + '</dd><dt>Recebimento</dt><dd>' + esc(order.deliveryMode || order.mode || 'Retirada') + '</dd><dt>Local</dt><dd>' + esc(destination) + '</dd>' + (address ? '<dt>Endereço / observação</dt><dd>' + esc(address).replace(/\n/g, '<br>') + '</dd>' : '') + locationLink + schedule + reservation + (totalDiscount > 0 ? '<dt>Descontos por sabor</dt><dd>− ' + money(totalDiscount) + '</dd>' : '') + '<dt>Frete cobrado</dt><dd>' + money(order.freight) + '</dd><dt>Custo vendido</dt><dd>' + money(order.cost) + '</dd><dt>Custo de entrega</dt><dd>' + money(order.deliveryCost) + '</dd><dt>Taxa de pagamento</dt><dd>' + money(order.paymentFee) + '</dd><dt>Lucro da venda</dt><dd>' + money(order.profit) + '</dd></dl>' + checklist + '<h4>Itens</h4><ul>' + lines + '</ul><div class="details-actions">' + actions + '</div>');
   }
   function orderDeliverySummary(draft, subtotal = draftOrderTotal()) {
@@ -1252,16 +1254,19 @@
     if (fixedLocation) parts.push('Localização fixa: ' + fixedLocation);
     return parts.join('\n');
   }
+  function fixedOrderLocationFields(draft) {
+    const location = String(draft.locationUrl || '').trim();
+    return '<input name="locationUrl" type="hidden" value="' + esc(location) + '"><div class="location-actions"><button type="button" class="outline" data-action="capture-order-location">Usar minha localização fixa</button>' + (location ? '<a class="fixed-location-link" href="' + esc(location) + '" target="_blank" rel="noopener">Localização adicionada</a><button type="button" class="text-button" data-action="clear-order-location">Remover</button>' : '<span>Opcional: envia um ponto fixo do mapa junto do endereço.</span>') + '</div>';
+  }
   function thermasFields(draft, zone) {
     if (!thermasRequired(zone)) return '';
-    const location = String(draft.locationUrl || '').trim();
     return '<section class="thermas-address"><div><h4>Endereço no Thermas</h4><p>Preencha todos os campos para a entrega chegar sem depender de mensagens extras.</p></div><div class="form-grid two">' +
       field('Gleba', '<select name="thermasGleba" required><option value="">Selecione</option>' + ['1', '2', '3'].map(value => '<option' + (String(draft.thermasGleba) === value ? ' selected' : '') + '>' + value + '</option>').join('') + '</select>') +
       field('Quadra', '<input name="thermasQuadra" required value="' + esc(draft.thermasQuadra || '') + '" placeholder="Ex.: 12">') +
       field('Lote', '<input name="thermasLote" required value="' + esc(draft.thermasLote || '') + '" placeholder="Ex.: 8">') +
       field('Rua', '<input name="thermasRua" required value="' + esc(draft.thermasRua || '') + '" placeholder="Ex.: Rua das Palmeiras">') +
       field('Número', '<input name="thermasNumero" required value="' + esc(draft.thermasNumero || '') + '" placeholder="Ex.: 123">') +
-      '</div><input name="locationUrl" type="hidden" value="' + esc(location) + '"><div class="location-actions"><button type="button" class="outline" data-action="capture-order-location">Usar minha localização fixa</button>' + (location ? '<a class="fixed-location-link" href="' + esc(location) + '" target="_blank" rel="noopener">Localização adicionada</a><button type="button" class="text-button" data-action="clear-order-location">Remover</button>' : '<span>Opcional: envia um ponto fixo do mapa junto do endereço.</span>') + '</div>' +
+      '</div>' + fixedOrderLocationFields(draft) +
       field('Ponto de referência (opcional)', '<textarea name="address" rows="2" placeholder="Ex.: portaria, bloco ou instrução para o entregador.">' + esc(draft.address || '') + '</textarea>') + '</section>';
   }
   function orderFulfillmentFields(draft) {
@@ -1273,7 +1278,7 @@
     const location = summary.delivery ? field('Local de entrega', '<select name="zoneId" required><option value="">Selecione o local</option>' + zones.map(zone => '<option value="' + esc(zone.id) + '"' + (summary.zone?.id === zone.id ? ' selected' : '') + '>' + esc(zone.name) + ' · frete ' + money(zone.fee) + '</option>').join('') + '</select>', 'Usa as cidades e bairros cadastrados em Configurações › Frete e entrega.') : '';
     const thermas = summary.delivery && thermasRequired(summary.zone);
     const addressLabel = summary.delivery ? 'Endereço de entrega' : 'Observação para retirada';
-    const address = thermas ? thermasFields(draft, summary.zone) : field(addressLabel, '<textarea name="address"' + (summary.delivery ? ' required' : '') + ' rows="3" placeholder="' + (summary.delivery ? 'Rua, número, bairro e ponto de referência.' : 'Ex.: horário desejado para retirar.') + '">' + esc(draft.address || '') + '</textarea>');
+    const address = thermas ? thermasFields(draft, summary.zone) : field(addressLabel, '<textarea name="address"' + (summary.delivery ? ' required' : '') + ' rows="3" placeholder="' + (summary.delivery ? 'Rua, número, bairro e ponto de referência.' : 'Ex.: horário desejado para retirar.') + '">' + esc(draft.address || '') + '</textarea>') + (summary.delivery ? fixedOrderLocationFields(draft) : '');
     return field('Forma de receber', select) + location + address + pickup;
   }
   function orderTotalMarkup(draft) {
@@ -2144,7 +2149,7 @@
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=51';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=55';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -2396,7 +2401,7 @@
     const thermasComplete = ['thermasGleba', 'thermasQuadra', 'thermasLote', 'thermasRua', 'thermasNumero'].every(key => String(draft[key] || '').trim());
     if (requiresThermas && (!['1', '2', '3'].includes(String(draft.thermasGleba || '')) || !thermasComplete)) throw new Error('No Thermas, informe Gleba (1, 2 ou 3), quadra, lote, rua e número.');
     if (summary.delivery && !requiresThermas && String(draft.address || '').trim().length < 5) throw new Error('Informe o endereço de entrega completo.');
-    return { kind, scheduledFor, dueDate: schedule ? scheduledFor : (draft.dueDate || today()), deliveryMode: summary.mode, zoneId: summary.zone?.id || '', deliveryZone: summary.zone?.name || '', address: summary.delivery && requiresThermas ? thermasAddress(draft) : String(draft.address || '').trim(), thermasGleba: requiresThermas ? String(draft.thermasGleba) : '', thermasQuadra: requiresThermas ? String(draft.thermasQuadra) : '', thermasLote: requiresThermas ? String(draft.thermasLote) : '', thermasRua: requiresThermas ? String(draft.thermasRua) : '', thermasNumero: requiresThermas ? String(draft.thermasNumero) : '', locationUrl: requiresThermas ? String(draft.locationUrl || '').trim() : '', freight: summary.freight, deliveryCost: summary.deliveryCost, total: summary.total };
+    return { kind, scheduledFor, dueDate: schedule ? scheduledFor : (draft.dueDate || today()), deliveryMode: summary.mode, zoneId: summary.zone?.id || '', deliveryZone: summary.zone?.name || '', address: summary.delivery && requiresThermas ? thermasAddress(draft) : String(draft.address || '').trim(), thermasGleba: requiresThermas ? String(draft.thermasGleba) : '', thermasQuadra: requiresThermas ? String(draft.thermasQuadra) : '', thermasLote: requiresThermas ? String(draft.thermasLote) : '', thermasRua: requiresThermas ? String(draft.thermasRua) : '', thermasNumero: requiresThermas ? String(draft.thermasNumero) : '', locationUrl: summary.delivery ? String(draft.locationUrl || '').trim() : '', freight: summary.freight, deliveryCost: summary.deliveryCost, total: summary.total };
   }
   async function submitOrder(form, editing = false) {
     if (orderSubmitting) return;

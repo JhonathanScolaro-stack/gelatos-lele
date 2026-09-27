@@ -28,7 +28,7 @@
     const type = productType(value);
     return type === 'Água' ? 'agua' : type === 'Leite' ? 'leite' : 'gourmet';
   };
-  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=54';
+  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=55';
   const openedFromManagement = () => new URLSearchParams(location.search).get('gestao') === '1';
   const ORDER_ATTEMPT_KEY = 'gelatos-lele-customer-order-attempt-v1';
   const CUSTOMER_CLIENT_KEY = 'gelatos-lele-customer-client-v1';
@@ -175,11 +175,21 @@
     if ((digits.length === 10 || digits.length === 11) && !digits.startsWith('55')) digits = '55' + digits;
     return digits.length >= 12 && digits.length <= 15 ? digits : '';
   }
+  function personalWhatsAppHref(phone, text) {
+    const webUrl = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(text);
+    // Em Android, o link comum (wa.me) abre o aplicativo definido como padrão,
+    // que pode ser o WhatsApp Business. Este intent aponta explicitamente para
+    // o pacote do WhatsApp pessoal; se ele não estiver instalado, o navegador
+    // volta com segurança para o link comum.
+    if (!/Android/i.test(navigator.userAgent || '')) return { href: webUrl, target: '_blank' };
+    const intent = 'intent://send?phone=' + encodeURIComponent(phone) + '&text=' + encodeURIComponent(text) + '#Intent;scheme=whatsapp;package=com.whatsapp;S.browser_fallback_url=' + encodeURIComponent(webUrl) + ';end';
+    return { href: intent, target: '_self' };
+  }
   function customerWhatsAppButton() {
     const phone = businessWhatsAppNumber();
     if (!phone) return '';
-    const text = encodeURIComponent('Olá! Vim pelo cardápio da ' + String(catalog?.brand || 'Gelatos Lele') + ' e gostaria de tirar uma dúvida.');
-    return '<a class="catalog-whatsapp" href="https://wa.me/' + phone + '?text=' + text + '" target="_blank" rel="noopener" aria-label="Falar com a Gelatos Lele no WhatsApp" title="Falar no WhatsApp"><svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d="M16 4.5a11.2 11.2 0 0 0-9.6 17l-1.3 5.9 6-1.5A11.2 11.2 0 1 0 16 4.5Zm0 20.4a9.1 9.1 0 0 1-4.35-1.1l-.42-.23-3.55.89.91-3.47-.27-.45A9.1 9.1 0 1 1 16 24.9Zm5-6.8c-.28-.14-1.65-.81-1.9-.9-.26-.1-.44-.14-.63.14-.18.27-.72.9-.88 1.08-.16.19-.32.21-.6.07-1.64-.81-2.72-1.45-3.8-3.29-.28-.48.28-.45.8-1.5.1-.2.05-.37-.02-.51-.07-.14-.63-1.52-.86-2.08-.23-.55-.47-.48-.64-.49h-.55c-.2 0-.51.07-.78.37-.27.3-1.03 1.01-1.03 2.46s1.06 2.85 1.2 3.05c.15.2 2.09 3.2 5.08 4.49.71.31 1.26.49 1.69.62.71.22 1.35.19 1.86.11.57-.09 1.65-.67 1.89-1.32.23-.65.23-1.21.16-1.32-.06-.12-.25-.19-.53-.33Z" fill="currentColor"/></svg></a>';
+    const link = personalWhatsAppHref(phone, 'Olá! Vim pelo cardápio da ' + String(catalog?.brand || 'Gelatos Lele') + ' e gostaria de tirar uma dúvida.');
+    return '<a class="catalog-whatsapp" href="' + esc(link.href) + '" target="' + link.target + '" rel="noopener" aria-label="Falar com a Gelatos Lele no WhatsApp pessoal" title="Falar no WhatsApp pessoal"><svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d="M16 4.5a11.2 11.2 0 0 0-9.6 17l-1.3 5.9 6-1.5A11.2 11.2 0 1 0 16 4.5Zm0 20.4a9.1 9.1 0 0 1-4.35-1.1l-.42-.23-3.55.89.91-3.47-.27-.45A9.1 9.1 0 1 1 16 24.9Zm5-6.8c-.28-.14-1.65-.81-1.9-.9-.26-.1-.44-.14-.63.14-.18.27-.72.9-.88 1.08-.16.19-.32.21-.6.07-1.64-.81-2.72-1.45-3.8-3.29-.28-.48.28-.45.8-1.5.1-.2.05-.37-.02-.51-.07-.14-.63-1.52-.86-2.08-.23-.55-.47-.48-.64-.49h-.55c-.2 0-.51.07-.78.37-.27.3-1.03 1.01-1.03 2.46s1.06 2.85 1.2 3.05c.15.2 2.09 3.2 5.08 4.49.71.31 1.26.49 1.69.62.71.22 1.35.19 1.86.11.57-.09 1.65-.67 1.89-1.32.23-.65.23-1.21.16-1.32-.06-.12-.25-.19-.53-.33Z" fill="currentColor"/></svg></a>';
   }
   function selectedProducts() { return catalog.products.filter(product => quantities[product.id] > 0); }
   function catalogCategories() {
@@ -223,7 +233,12 @@
   function isDelivery() { return String(draft.mode || '').toLocaleLowerCase('pt-BR').includes('entrega'); }
   function thermasRequired(zone) { return Boolean(zone?.requiresThermasAddress) || /(thermas|santa\s*b[aá]rbara\s*resort)/i.test(String(zone?.name || '')); }
   function deliveryAddress(result = orderTotals()) {
-    if (!result.delivery || !thermasRequired(result.zone)) return draft.address.trim();
+    if (!result.delivery) return draft.address.trim();
+    if (!thermasRequired(result.zone)) {
+      const fields = [draft.address.trim()];
+      if (draft.locationUrl.trim()) fields.push('Localização fixa: ' + draft.locationUrl.trim());
+      return fields.filter(Boolean).join('\n');
+    }
     const fields = ['Thermas Resort Residence', 'Gleba ' + draft.thermasGleba, 'Quadra ' + draft.thermasQuadra, 'Lote ' + draft.thermasLote, 'Rua ' + draft.thermasRua, 'Número ' + draft.thermasNumero];
     if (draft.address.trim()) fields.push('Referência: ' + draft.address.trim());
     if (draft.locationUrl.trim()) fields.push('Localização fixa: ' + draft.locationUrl.trim());
@@ -305,7 +320,10 @@
   function thermasFields(result) {
     if (!result.delivery || !thermasRequired(result.zone)) return '';
     const location = String(draft.locationUrl || '').trim();
-    return '<section class="thermas-address"><div><h3>Endereço no Thermas</h3><p>Para a entrega chegar certinho, preencha todos os campos.</p></div><div class="thermas-grid"><label>Gleba<select name="thermasGleba" required><option value="">Selecione</option>' + ['1', '2', '3'].map(value => '<option' + (String(draft.thermasGleba) === value ? ' selected' : '') + '>' + value + '</option>').join('') + '</select></label><label>Quadra<input name="thermasQuadra" required value="' + esc(draft.thermasQuadra) + '" placeholder="Ex.: 12"></label><label>Lote<input name="thermasLote" required value="' + esc(draft.thermasLote) + '" placeholder="Ex.: 8"></label><label>Rua<input name="thermasRua" required value="' + esc(draft.thermasRua) + '" placeholder="Ex.: Rua das Palmeiras"></label><label>Número<input name="thermasNumero" required value="' + esc(draft.thermasNumero) + '" placeholder="Ex.: 123"></label></div><input name="locationUrl" type="hidden" value="' + esc(location) + '"><div class="location-actions"><button type="button" class="outline" data-action="capture-location">Usar minha localização fixa</button>' + (location ? '<a href="' + esc(location) + '" target="_blank" rel="noopener">Localização adicionada</a><button type="button" class="text-link" data-action="clear-location">Remover</button>' : '<span>Opcional: envia um ponto fixo do mapa junto do pedido.</span>') + '</div><label>Ponto de referência (opcional)<textarea name="address" placeholder="Ex.: portaria, bloco ou instrução para entrega.">' + esc(draft.address) + '</textarea></label></section>';
+    return '<section class="thermas-address"><div><h3>Endereço no Thermas</h3><p>Para a entrega chegar certinho, preencha todos os campos.</p></div><div class="thermas-grid"><label>Gleba<select name="thermasGleba" required><option value="">Selecione</option>' + ['1', '2', '3'].map(value => '<option' + (String(draft.thermasGleba) === value ? ' selected' : '') + '>' + value + '</option>').join('') + '</select></label><label>Quadra<input name="thermasQuadra" required value="' + esc(draft.thermasQuadra) + '" placeholder="Ex.: 12"></label><label>Lote<input name="thermasLote" required value="' + esc(draft.thermasLote) + '" placeholder="Ex.: 8"></label><label>Rua<input name="thermasRua" required value="' + esc(draft.thermasRua) + '" placeholder="Ex.: Rua das Palmeiras"></label><label>Número<input name="thermasNumero" required value="' + esc(draft.thermasNumero) + '" placeholder="Ex.: 123"></label></div>' + fixedLocationFields(location) + '<label>Ponto de referência (opcional)<textarea name="address" placeholder="Ex.: portaria, bloco ou instrução para entrega.">' + esc(draft.address) + '</textarea></label></section>';
+  }
+  function fixedLocationFields(location = String(draft.locationUrl || '').trim()) {
+    return '<input name="locationUrl" type="hidden" value="' + esc(location) + '"><div class="location-actions"><button type="button" class="outline" data-action="capture-location">Usar minha localização fixa</button>' + (location ? '<a href="' + esc(location) + '" target="_blank" rel="noopener">Localização adicionada</a><button type="button" class="text-link" data-action="clear-location">Remover</button>' : '<span>Opcional: envia um ponto fixo do mapa junto do pedido.</span>') + '</div>';
   }
   function orderForm(result, zones, modes) {
     const zoneField = result.delivery ? '<label>Local de entrega<select name="zoneId" required><option value="">Selecione o local</option>' + zones.map(zone => '<option value="' + esc(zone.id) + '"' + (String(zone.id) === String(draft.zoneId) ? ' selected' : '') + '>' + esc(zone.name) + ' · frete ' + money.format(zone.fee) + '</option>').join('') + '</select></label>' : '';
@@ -313,7 +331,7 @@
     const usingThermas = result.delivery && thermasRequired(result.zone);
     const addressLabel = result.delivery ? 'Endereço de entrega' : 'Observação para retirada (opcional)';
     const addressPlaceholder = result.delivery ? 'Rua, número, bairro e ponto de referência.' : 'Ex.: horário desejado para retirar.';
-    const addressField = usingThermas ? thermasFields(result) : '<label>' + addressLabel + '<textarea name="address"' + (result.delivery ? ' required' : '') + ' placeholder="' + addressPlaceholder + '">' + esc(draft.address) + '</textarea></label>';
+    const addressField = usingThermas ? thermasFields(result) : '<label>' + addressLabel + '<textarea name="address"' + (result.delivery ? ' required' : '') + ' placeholder="' + addressPlaceholder + '">' + esc(draft.address) + '</textarea></label>' + (result.delivery ? fixedLocationFields() : '');
     const scheduleNotice = isScheduled() ? '<section class="notice scheduled-notice"><b>Encomenda para ' + esc(scheduledDateText(draft.scheduledFor)) + '.</b><br>Depois do envio, a Gelatos Lele confirmará o preparo e o pagamento pelo WhatsApp.</section>' : '';
     return pickupNotice + '<form id="customerOrder" class="panel checkout"><h2>Seu pedido</h2>' + scheduleNotice + cartLines(result) + '<label>Seu nome<input name="customer" required value="' + esc(draft.customer) + '" placeholder="Ex.: Maria"></label><label>WhatsApp para confirmação<input name="phone" inputmode="tel" required value="' + esc(draft.phone) + '" placeholder="Ex.: 11999999999"></label><p class="small">Usaremos somente para confirmar este pedido.</p><label>Forma de receber<select name="mode">' + modes.map(mode => '<option' + (mode === draft.mode ? ' selected' : '') + '>' + esc(mode) + '</option>').join('') + '</select></label>' + zoneField + addressField + '<label>Forma de pagamento<select name="payment"><option' + (draft.payment === 'Pix' ? ' selected' : '') + '>Pix</option><option' + (draft.payment === 'Dinheiro' ? ' selected' : '') + '>Dinheiro</option><option' + (draft.payment === 'Crédito' ? ' selected' : '') + '>Crédito</option><option' + (draft.payment === 'Débito' ? ' selected' : '') + '>Débito</option></select></label>' + totalsMarkup(result) + '<button class="primary">Revisar pedido</button><p class="small">Antes de enviar, você verá itens, frete, endereço e valor total.</p></form>';
   }
