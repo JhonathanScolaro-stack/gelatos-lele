@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v56-team-notices-resale-pricing';
+const CACHE = 'gelatos-lele-company-v57-cloudflare-sync';
 const ASSETS = [
   './',
   './index.html',
@@ -31,7 +31,7 @@ self.addEventListener('activate', event => {
 });
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
-  // O catálogo e os pedidos vêm do Supabase. Nunca colocamos respostas do
+  // O catálogo e os pedidos vêm da nuvem. Nunca colocamos respostas do
   // banco no cache do navegador: assim o próximo cliente vê o estoque real.
   if (new URL(event.request.url).origin !== self.location.origin) return;
   const url = new URL(event.request.url);

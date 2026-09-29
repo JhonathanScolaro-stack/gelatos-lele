@@ -1,9 +1,10 @@
-/* Esta chave é pública por definição. As regras do banco protegem os dados. */
+/* O navegador fala somente com o Worker Cloudflare. A configuração antiga
+   abaixo existe apenas para a migração única do aparelho que já tem os dados. */
 window.GelatosCloudConfig = Object.freeze({
-  url: 'https://gjizibonogbaqymdtito.supabase.co',
-  publishableKey: 'sb_publishable_jV6pjMx3oKovqbmPV4xPPQ_ZOAEK8Zw',
+  apiUrl: 'https://gelatos-lele-sync.scolarojhonathan.workers.dev',
   storeSlug: 'gelatos-lele',
-  // Preenchido quando o Worker Cloudflare R2 for publicado. Enquanto vazio,
-  // o app mantém compatibilidade com as imagens antigas já salvas no banco.
-  mediaWorkerUrl: 'https://gelatos-lele-media.scolarojhonathan.workers.dev'
+  legacySupabase: {
+    url: 'https://gjizibonogbaqymdtito.supabase.co',
+    publishableKey: 'sb_publishable_jV6pjMx3oKovqbmPV4xPPQ_ZOAEK8Zw'
+  }
 });
