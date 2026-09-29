@@ -96,3 +96,25 @@ main[class*="screen-settings-"] .form-panel > * { margin-top: 0; }
   .delivery-zone-row label:first-of-type { grid-column: 1 / -1; }
   .delivery-zone-row .line-remove { grid-column: 2; justify-self: end; }
 }
+
+/* Revenda: o preço vem da configuração do sabor e não pode ser alterado no
+   pedido. O destaque explica isso sem parecer um campo quebrado. */
+.resale-pricing-panel { margin-top: 12px; padding: 15px; background: #fff8fa; }
+.resale-pricing-panel .section-line { margin-bottom: 12px; }
+.readonly-field {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  padding: 11px 12px;
+  border: 1px solid #ebc6ce;
+  border-radius: 12px;
+  background: #fff;
+}
+.readonly-field b { color: var(--pink-dark); font-size: 20px; }
+.readonly-field small { color: var(--muted); font-size: 12px; line-height: 1.35; }
+.resale-price-fixed {
+  background: #f7eef0 !important;
+  color: var(--ink) !important;
+  font-weight: 800;
+  cursor: default;
+}

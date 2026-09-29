@@ -239,6 +239,8 @@
         productType: categoryNameFrom(productCategories, categoryId(item), item.productType),
         description: item.description || '',
         preparation: item.preparation || '',
+        resaleEnabled: item.resaleEnabled === true,
+        resaleUnitPrice: Math.max(0, n(item.resaleUnitPrice)),
         laborAmount: Math.max(0, n(item.laborAmount)),
         laborMode: item.laborMode === 'unit' ? 'unit' : 'batch',
         items: Array.isArray(item.items) ? item.items : []
@@ -328,7 +330,10 @@
         notes: String(item.notes || '').trim(),
         active: item.active !== false
       })).filter(item => item.name) : [],
-      notifications: Array.isArray(old.notifications) ? old.notifications : [],
+      notifications: Array.isArray(old.notifications) ? old.notifications.map(item => ({
+        ...item,
+        actorId: String(item?.actorId || '').trim().toLocaleLowerCase('pt-BR')
+      })) : [],
       notificationKeys: Array.isArray(old.notificationKeys) ? old.notificationKeys : [],
       settings: normalizedSettings
     };
@@ -760,9 +765,22 @@
     clearTimeout(toast.timer);
     toast.timer = setTimeout(() => node.classList.remove('show'), 3500);
   }
-  function addNotice(type, title, body, route, key = '') {
+  // A identificação fica somente nos dados internos: ela permite que cada
+  // pessoa veja uma atividade feita pela outra sem exibir e-mails no app.
+  function currentActorId() {
+    return String(window.GelatosCloud?.email?.() || '').trim().toLocaleLowerCase('pt-BR');
+  }
+  function noticeIsVisible(item) {
+    const actorId = String(item?.actorId || '').trim().toLocaleLowerCase('pt-BR');
+    return !actorId || !currentActorId() || actorId !== currentActorId();
+  }
+  const visibleNotifications = () => data.notifications.filter(noticeIsVisible);
+  function addNotice(type, title, body, route, key = '', actorId = '') {
     if (key && data.notificationKeys.includes(key)) return;
-    data.notifications.unshift({ id: uid(), type, title, body, route, key, date: new Date().toISOString(), read: false });
+    data.notifications.unshift({ id: uid(), type, title, body, route, key, actorId: String(actorId || '').trim().toLocaleLowerCase('pt-BR'), date: new Date().toISOString(), read: false });
+    // Notificações antigas não precisam acompanhar a empresa para sempre.
+    // Mantemos uma janela suficiente para consulta, sem aumentar a cópia da nuvem.
+    data.notifications = data.notifications.slice(0, 120);
     if (key) data.notificationKeys.push(key);
   }
   function refreshNotices() {
@@ -827,11 +845,18 @@
     const cost = fullRecipeCost(recipe);
     const saleUnitPrice = n(recipe.saleUnitPrice);
     const unitProfit = round(saleUnitPrice - cost.unitCost);
+    const resaleEnabled = recipe.resaleEnabled === true;
+    const resaleUnitPrice = resaleEnabled ? n(recipe.resaleUnitPrice) : 0;
+    const resaleUnitProfit = resaleEnabled ? round(resaleUnitPrice - cost.unitCost) : 0;
     return {
       ...cost,
       saleUnitPrice,
       unitProfit,
-      margin: saleUnitPrice > 0 ? round(unitProfit / saleUnitPrice * 100) : 0
+      margin: saleUnitPrice > 0 ? round(unitProfit / saleUnitPrice * 100) : 0,
+      resaleEnabled,
+      resaleUnitPrice,
+      resaleUnitProfit,
+      resaleMargin: resaleUnitPrice > 0 ? round(resaleUnitProfit / resaleUnitPrice * 100) : 0
     };
   }
   function createProduction(recipe, batches, date, correction = false) {
@@ -969,14 +994,14 @@
     if (cloudInitialLoad) return '<div class="boot cloud-boot"><strong>Conectando sua empresa…</strong><span>Estamos conferindo a cópia mais recente antes de liberar alterações.</span></div><div id="toast" role="status" aria-live="polite"></div>';
     const needsAuth = state.screen === 'settings-cloud' && (!window.GelatosCloud?.hasSession() || window.GelatosCloud?.isPasswordRecovery?.());
     if (needsAuth) return '<div class="auth-shell">' + settingsScreen() + '</div><div id="toast" role="status" aria-live="polite"></div>';
-    const unread = data.notifications.filter(item => !item.read).length;
+    const unread = visibleNotifications().filter(item => !item.read).length;
     return '<div class="app-shell"><header class="topbar"><button class="icon-button" data-action="open-menu" aria-label="Abrir menu">☰</button><img class="brand" src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="bell-button" data-action="open-notices" aria-label="Notificações">🔔' + (unread ? '<b>' + unread + '</b>' : '') + '</button><button id="installCta" class="install-cta" hidden>Instalar</button></header><div class="drawer-shade" data-action="close-menu"></div><aside class="drawer"><div class="drawer-brand"><img src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="icon-button" data-action="close-menu" aria-label="Fechar menu">×</button></div><nav><button class="nav-home" data-route="home">Tela inicial</button>' +
       navGroup('Controle de pedidos', 'orders', [['Novo pedido', 'orders:new'], ['Pedidos realizados', 'orders:history']]) +
-      navGroup('Controle de estoque', 'stock', [['Cadastrar compra', 'stock:purchase'], ['Estoque produzido', 'stock:ready'], ['Estoque de insumos', 'stock:supply'], ['Estoque de ingredientes', 'stock:ingredient'], ['Produções', 'production'], ['Nova receita', 'recipes']]) +
+      navGroup('Controle de estoque', 'stock', [['Estoque produzido', 'stock:ready'], ['Estoque de insumos', 'stock:supply'], ['Estoque de ingredientes', 'stock:ingredient'], ['Produções', 'production']]) +
       navGroup('Revendas', 'resale', [['Visão das revendas', 'resale:dashboard'], ['Nova venda para revenda', 'resale:new'], ['Vendas para revenda', 'resale:history'], ['Cadastro de revendedores', 'resale:people']]) +
       navGroup('Financeiro', 'finance', [['Visão financeira', 'finance:overview'], ['Contas a receber', 'finance:receivable'], ['Contas pagas', 'finance:payable'], ['Fechamento inicial', 'finance:opening']]) +
       navGroup('Relatórios', 'reports', [['Pedidos', 'reports:orders'], ['Financeiro', 'reports:finance'], ['Estoque', 'reports:stock']]) +
-      navGroup('Cadastros', 'records', [['Cardápio / sabores', 'records:catalog'], ['Categorias de geladinho', 'records:categories'], ['Ingredientes', 'stock:ingredient'], ['Insumos', 'stock:supply'], ['Fornecedores', 'records:suppliers']]) +
+      navGroup('Cadastros', 'records', [['Cadastrar compra', 'stock:purchase'], ['Cardápio / sabores', 'records:catalog'], ['Categorias de geladinhos', 'records:categories'], ['Ingredientes', 'stock:ingredient'], ['Insumos', 'stock:supply'], ['Fornecedores', 'records:suppliers'], ['Nova receita', 'recipes']]) +
       navGroup('Ferramentas', 'tools', [['Preços e compras', 'tools:compare'], ['Produção possível', 'tools:capacity']]) +
       navGroup('Configurações', 'settings', [['Visão geral', 'settings:home'], ['Nuvem e sincronização', 'settings:cloud'], ['Logo do app', 'settings:appearance'], ['Mensagem e Pix', 'settings:message'], ['Cardápio do cliente', 'settings:catalog'], ['Frete e entrega', 'settings:delivery'], ['Backup', 'settings:backup']]) +
       '</nav></aside><main class="screen-' + esc(state.screen) + '">' + inAppBackButton() + screen() + '</main>' + noticesPanel() + infoPanel() + '</div><div id="toast" role="status" aria-live="polite"></div>';
@@ -1381,12 +1406,9 @@
       note: f?.note?.value || state.resaleDraft?.note || ''
     };
   }
-  function suggestedResalePrice(productId, resellerId = resaleDraftFromForm().resellerId) {
-    const product = ready()[productId];
+  function suggestedResalePrice(productId) {
     const recipe = recipeById()[productId];
-    const retail = n(product?.saleUnitPrice || recipe?.saleUnitPrice);
-    const discount = n(resellerById()[resellerId]?.discountPercent);
-    return round(retail * Math.max(0, 1 - discount / 100));
+    return recipe?.resaleEnabled === true ? n(recipe.resaleUnitPrice) : 0;
   }
   function resaleLines() {
     const grouped = {};
@@ -1401,8 +1423,8 @@
     return Object.values(grouped).map(line => {
       const product = ready()[line.productId];
       const recipe = recipeById()[line.productId];
-      const price = n(line.saleUnitPrice || suggestedResalePrice(line.productId));
-      return { ...line, productName: product?.name || recipe?.name || 'Geladinho', saleUnitPrice: price, unitCost: n(product?.unitCost), available: n(product?.quantity) };
+      const price = suggestedResalePrice(line.productId);
+      return { ...line, productName: product?.name || recipe?.name || 'Geladinho', saleUnitPrice: price, unitCost: n(product?.unitCost), available: n(product?.quantity), resaleEnabled: recipe?.resaleEnabled === true };
     });
   }
   function resaleSummary() {
@@ -1413,11 +1435,14 @@
     return { lines, subtotal, cost, profit: round(subtotal - cost), shortages };
   }
   function resaleProductOptions(selected) {
-    const entries = data.readyStock.slice().sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
-    return '<option value="">Selecione um sabor</option>' + entries.map(product => '<option value="' + esc(product.recipeId) + '"' + (String(product.recipeId) === String(selected) ? ' selected' : '') + (n(product.quantity) > 0 ? '' : ' disabled') + '>' + esc(product.name + ' · ' + qtyText(product.quantity) + ' un. em estoque · varejo ' + money(product.saleUnitPrice)) + '</option>').join('');
+    const entries = data.readyStock.filter(product => recipeById()[product.recipeId]?.resaleEnabled === true).slice().sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+    return '<option value="">Selecione um sabor</option>' + entries.map(product => {
+      const recipe = recipeById()[product.recipeId];
+      return '<option value="' + esc(product.recipeId) + '"' + (String(product.recipeId) === String(selected) ? ' selected' : '') + (n(product.quantity) > 0 ? '' : ' disabled') + '>' + esc(product.name + ' · ' + qtyText(product.quantity) + ' un. em estoque · revenda ' + money(recipe.resaleUnitPrice)) + '</option>';
+    }).join('');
   }
   function resaleLineMarkup() {
-    return state.resaleLines.map((line, index) => '<div class="resale-line"><select data-resale-product="' + index + '">' + resaleProductOptions(line.productId) + '</select><input data-resale-quantity="' + index + '" inputmode="decimal" value="' + esc(line.quantity) + '" aria-label="Quantidade" placeholder="Quantidade"><input data-resale-price="' + index + '" inputmode="decimal" value="' + esc(String(line.saleUnitPrice || '').replace('.', ',')) + '" aria-label="Preço por unidade" placeholder="Preço por un."><button class="line-remove" type="button" data-action="remove-resale-line" data-index="' + index + '" aria-label="Remover sabor">×</button></div>').join('');
+    return state.resaleLines.map((line, index) => '<div class="resale-line"><select data-resale-product="' + index + '">' + resaleProductOptions(line.productId) + '</select><input data-resale-quantity="' + index + '" inputmode="decimal" value="' + esc(line.quantity) + '" aria-label="Quantidade" placeholder="Quantidade"><input class="resale-price-fixed" readonly value="' + esc(String(suggestedResalePrice(line.productId) || '').replace('.', ',')) + '" aria-label="Preço fixo por unidade" placeholder="Preço fixo"><button class="line-remove" type="button" data-action="remove-resale-line" data-index="' + index + '" aria-label="Remover sabor">×</button></div>').join('');
   }
   function resalePreview() {
     const summary = resaleSummary();
@@ -1445,13 +1470,12 @@
   }
   function resellerFormScreen() {
     const editing = state.editReseller ? resellerById()[state.editReseller] : null;
-    const base = editing || { name: '', phone: '', city: '', paymentTerms: '', discountPercent: '', notes: '', active: true };
+    const base = editing || { name: '', phone: '', city: '', paymentTerms: '', notes: '', active: true };
     return '<section class="screen active">' + heading('Revendas', editing ? 'Editar revendedora' : 'Cadastrar revendedora', 'Registre quem compra para revender. Cada venda sai do estoque e fica em contas a receber até você marcar o pagamento.') + '<form id="resellerForm" class="panel form-panel"><input type="hidden" name="id" value="' + esc(editing?.id || '') + '"><div class="form-grid two">' +
       field('Nome', '<input name="name" required value="' + esc(base.name) + '" placeholder="Ex.: Ana Silva">') +
       field('WhatsApp', '<input name="phone" inputmode="tel" value="' + esc(base.phone) + '" placeholder="Ex.: 11999999999">') +
       field('Cidade ou bairro', '<input name="city" value="' + esc(base.city) + '" placeholder="Ex.: Centro">') +
       field('Prazo de pagamento', '<input name="paymentTerms" value="' + esc(base.paymentTerms) + '" placeholder="Ex.: semanal, 7 dias">') +
-      field('Desconto padrão sobre varejo (%)', '<input name="discountPercent" inputmode="decimal" value="' + esc(String(base.discountPercent || '').replace('.', ',')) + '" placeholder="Ex.: 20">', 'Só sugere um preço na nova venda. Você poderá alterar o preço de cada sabor antes de salvar.') +
       '</div><label class="form-field"><span>Observações</span><textarea name="notes" rows="3" placeholder="Ex.: retira toda sexta-feira.">' + esc(base.notes) + '</textarea></label><label class="catalog-switch"><input name="active" type="checkbox"' + (base.active !== false ? ' checked' : '') + '> Cadastro ativo</label><div class="button-row"><button class="primary">Salvar revendedora</button><button class="outline" type="button" data-route="resale:people">Cancelar</button></div></form></section>';
   }
   function resaleScreen() {
@@ -1460,10 +1484,10 @@
       const cards = (data.resellers || []).slice().sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')).map(reseller => {
         const sales = resaleOrders().filter(order => String(order.resellerId) === String(reseller.id));
         const outstanding = sales.filter(order => order.status === 'confirmed').reduce((sum, order) => sum + n(order.total), 0);
-        const body = '<dl><dt>WhatsApp</dt><dd>' + esc(reseller.phone || 'não informado') + '</dd><dt>Região</dt><dd>' + esc(reseller.city || 'não informada') + '</dd><dt>Prazo</dt><dd>' + esc(reseller.paymentTerms || 'a combinar') + '</dd><dt>Desconto padrão</dt><dd>' + n(reseller.discountPercent).toLocaleString('pt-BR') + '%</dd><dt>A receber</dt><dd>' + money(outstanding) + '</dd></dl><div class="details-actions"><button class="outline" data-action="edit-reseller" data-id="' + esc(reseller.id) + '">Editar</button><button class="outline danger-button" data-action="delete-reseller" data-id="' + esc(reseller.id) + '">' + (sales.length ? 'Desativar' : 'Excluir') + '</button></div>';
+        const body = '<dl><dt>WhatsApp</dt><dd>' + esc(reseller.phone || 'não informado') + '</dd><dt>Região</dt><dd>' + esc(reseller.city || 'não informada') + '</dd><dt>Prazo</dt><dd>' + esc(reseller.paymentTerms || 'a combinar') + '</dd><dt>A receber</dt><dd>' + money(outstanding) + '</dd></dl><p class="form-note">Os valores de revenda são definidos em cada sabor, no Cardápio / sabores.</p><div class="details-actions"><button class="outline" data-action="edit-reseller" data-id="' + esc(reseller.id) + '">Editar</button><button class="outline danger-button" data-action="delete-reseller" data-id="' + esc(reseller.id) + '">' + (sales.length ? 'Desativar' : 'Excluir') + '</button></div>';
         return detail(reseller.name, (reseller.active === false ? 'Cadastro desativado' : 'Cadastro ativo') + ' · ' + sales.length + ' venda(s)', '', reseller.active === false ? 'inativo' : 'ativo', body);
       }).join('') || empty('Cadastre a primeira revendedora para iniciar vendas por lote.');
-      return '<section class="screen active">' + heading('Revendas', 'Cadastro de revendedoras', 'Mantenha contatos, prazo combinado e desconto padrão em um lugar só.') + '<div class="isolated-actions"><button class="primary" data-action="new-reseller">Cadastrar revendedora</button><button class="secondary" data-route="resale:new">Nova venda</button></div><div class="list">' + cards + '</div></section>';
+      return '<section class="screen active">' + heading('Revendas', 'Cadastro de revendedoras', 'Mantenha contatos e prazo combinado. O valor de revenda é definido em cada sabor.') + '<div class="isolated-actions"><button class="primary" data-action="new-reseller">Cadastrar revendedora</button><button class="secondary" data-route="resale:new">Nova venda</button></div><div class="list">' + cards + '</div></section>';
     }
     if (state.screen === 'resale-history') {
       const cards = resaleOrders().slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(resaleOrderCard).join('') || empty('Nenhuma venda para revenda registrada ainda.');
@@ -1472,7 +1496,8 @@
     if (state.screen === 'resale-new') {
       const draft = { resellerId: '', payment: 'Pix', date: today(), dueDate: today(), paidNow: false, note: '', ...(state.resaleDraft || {}) };
       const resellerOptions = '<option value="">Selecione a revendedora</option>' + activeResellers().map(item => '<option value="' + esc(item.id) + '"' + (String(item.id) === String(draft.resellerId) ? ' selected' : '') + '>' + esc(item.name + (item.city ? ' · ' + item.city : '')) + '</option>').join('');
-      return '<section class="screen active">' + heading('Revendas', 'Nova venda para revenda', 'Compra direta: o lote sai agora do estoque pronto e o valor fica em Contas a receber até o pagamento.') + (activeResellers().length ? '<form id="resaleForm" class="panel form-panel"><div class="form-grid two">' + field('Revendedora', '<select name="resellerId" required>' + resellerOptions + '</select>') + field('Forma de recebimento', '<select name="payment">' + METHODS.map(method => '<option' + (method === draft.payment ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') + field('Data da venda', '<input name="date" type="date" value="' + esc(draft.date) + '">') + field('Vencimento combinado', '<input name="dueDate" type="date" value="' + esc(draft.dueDate) + '">') + '</div><label class="catalog-switch"><input name="paidNow" type="checkbox"' + (draft.paidNow ? ' checked' : '') + '> Já recebi este valor</label><div class="section-line"><div><h3>Lote separado</h3><p>Selecione os sabores prontos, a quantidade e o preço que a revendedora pagará por unidade.</p></div></div><div class="resale-table-title"><span>Sabor</span><span>Quantidade</span><span>Preço por un.</span><span></span></div><div class="resale-lines">' + resaleLineMarkup() + '</div><button type="button" class="outline full" data-action="add-resale-line">+ Adicionar outro sabor</button><label class="form-field"><span>Observação</span><textarea name="note" rows="2" placeholder="Ex.: lote entregue em 24/09.">' + esc(draft.note) + '</textarea></label>' + resalePreview() + '<button class="primary full">Confirmar venda e separar lote</button></form>' : '<section class="panel"><p>Antes da primeira venda, cadastre a revendedora para manter o controle correto de prazo, contato e contas a receber.</p><button class="primary full" data-action="new-reseller">Cadastrar revendedora</button></section>') + '</section>';
+      const resaleReady = data.readyStock.some(product => recipeById()[product.recipeId]?.resaleEnabled === true && n(product.quantity) > 0);
+      return '<section class="screen active">' + heading('Revendas', 'Nova venda para revenda', 'Compra direta: o lote sai agora do estoque pronto e o valor fica em Contas a receber até o pagamento.') + (!resaleReady ? '<section class="panel caution"><b>Nenhum sabor pronto está liberado para revenda.</b><p>Em Cadastros › Cardápio / sabores, abra o sabor, marque “Disponível para revenda” e informe seu valor fixo por unidade. Depois produza o lote.</p></section>' : '') + (activeResellers().length ? '<form id="resaleForm" class="panel form-panel"><div class="form-grid two">' + field('Revendedora', '<select name="resellerId" required>' + resellerOptions + '</select>') + field('Forma de recebimento', '<select name="payment">' + METHODS.map(method => '<option' + (method === draft.payment ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') + field('Data da venda', '<input name="date" type="date" value="' + esc(draft.date) + '">') + field('Vencimento combinado', '<input name="dueDate" type="date" value="' + esc(draft.dueDate) + '">') + '</div><label class="catalog-switch"><input name="paidNow" type="checkbox"' + (draft.paidNow ? ' checked' : '') + '> Já recebi este valor</label><div class="section-line"><div><h3>Lote separado</h3><p>Selecione os sabores prontos liberados para revenda. O preço é fixo por sabor e vem do Cardápio / sabores.</p></div></div><div class="resale-table-title"><span>Sabor</span><span>Quantidade</span><span>Preço fixo</span><span></span></div><div class="resale-lines">' + resaleLineMarkup() + '</div><button type="button" class="outline full" data-action="add-resale-line">+ Adicionar outro sabor</button><label class="form-field"><span>Observação</span><textarea name="note" rows="2" placeholder="Ex.: lote entregue em 24/09.">' + esc(draft.note) + '</textarea></label>' + resalePreview() + '<button class="primary full"' + (resaleReady ? '' : ' disabled') + '>Confirmar venda e separar lote</button></form>' : '<section class="panel"><p>Antes da primeira venda, cadastre a revendedora para manter o controle correto de prazo, contato e contas a receber.</p><button class="primary full" data-action="new-reseller">Cadastrar revendedora</button></section>') + '</section>';
     }
     const sales = resaleOrders();
     const open = sales.filter(order => order.status === 'confirmed').reduce((sum, order) => sum + n(order.total), 0);
@@ -1565,6 +1590,8 @@
       saleUnitPrice: f?.saleUnitPrice?.value || '',
       laborAmount: f?.laborAmount?.value || '',
       laborMode: f?.laborMode?.value || 'batch',
+      resaleEnabled: f?.resaleEnabled ? f.resaleEnabled.checked : false,
+      resaleUnitPrice: f?.resaleUnitPrice?.value || '',
       preparation: f?.preparation?.value || '',
       description: f?.description?.value || '',
       active: f?.active ? f.active.checked : true
@@ -1590,12 +1617,14 @@
     const unitCost = $('#recipeUnitCostPreview');
     const profit = $('#recipeProfitPreview');
     const margin = $('#recipeMarginPreview');
+    const resaleProfit = $('#recipeResaleProfitPreview');
     if (total) total.textContent = money(cost?.batchCost || 0);
     if (materials) materials.textContent = money(cost?.materialCost || 0);
     if (labor) labor.textContent = money(cost?.laborCost || 0);
     if (unitCost) unitCost.textContent = money(cost?.unitCost || 0);
     if (profit) profit.textContent = money(cost?.unitProfit || 0);
     if (margin) margin.textContent = cost ? cost.margin.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '%' : '—';
+    if (resaleProfit) resaleProfit.textContent = money(cost?.resaleUnitProfit || 0);
     if (detailText) detailText.textContent = cost ? 'Materiais: ' + money(cost.materialCost) + ' · mão de obra: ' + money(cost.laborCost) + '. Lucro bruto = preço de venda − custo por unidade.' : 'Complete rendimento, item, quantidade e unidade para calcular.';
   }
   function recipeScreen() {
@@ -1605,14 +1634,19 @@
       state.recipeDraft = { ...editing };
       state.recipeLinesLoaded = true;
     }
-    const base = editing || state.recipeDraft || { name: '', productCategoryId: productCategories()[0]?.id || 'gourmet', yieldUnits: '', saleUnitPrice: '', laborAmount: '', laborMode: 'batch', preparation: '', description: '', active: true };
+    const base = editing || state.recipeDraft || { name: '', productCategoryId: productCategories()[0]?.id || 'gourmet', yieldUnits: '', saleUnitPrice: '', laborAmount: '', laborMode: 'batch', resaleEnabled: false, resaleUnitPrice: '', preparation: '', description: '', active: true };
     const estimation = (() => {
       try {
         const candidate = { ...base, items: state.recipeLines.map(line => ({ supplyId: line.supplyId, quantity: n(line.quantity), unit: line.unit })).filter(line => line.supplyId && line.quantity > 0 && line.unit) };
         return candidate.items.length && n(candidate.yieldUnits) > 0 ? recipeMetrics(candidate) : null;
       } catch (_) { return null; }
     })();
-    return '<section class="screen active">' + heading('Receitas', editing ? 'Editar receita' : 'Nova receita', 'Cadastre o sabor, os ingredientes, embalagens, modo de preparo e custo do lote.') + '<form id="recipeForm" class="panel form-panel"><input type="hidden" name="id" value="' + esc(editing?.id || '') + '"><div class="form-grid two">' +
+    const resaleEnabled = base.resaleEnabled === true;
+    const resaleFields = resaleEnabled ? '<section class="panel resale-pricing-panel"><div class="section-line"><div><h3>Revenda</h3><p>Este valor é fixo por sabor. Ele será usado automaticamente em toda nova venda para revenda.</p></div></div><div class="form-grid two">' +
+      field('Valor para a revendedora por unidade (R$)', '<input name="resaleUnitPrice" required inputmode="decimal" value="' + esc(String(base.resaleUnitPrice || '').replace('.', ',')) + '" placeholder="Ex.: 4,50">', 'É quanto a revendedora paga por cada geladinho deste sabor.') +
+      '<div class="form-field readonly-field"><span>Seu lucro por unidade na revenda' + info('Preço da revendedora menos o custo atual de materiais e mão de obra deste sabor.', 'Lucro na revenda') + '</span><b id="recipeResaleProfitPreview">' + money(estimation?.resaleUnitProfit || 0) + '</b><small>É recalculado automaticamente quando o custo da receita mudar.</small></div>' +
+      '</div></section>' : '';
+    return '<section class="screen active">' + heading('Cadastros', editing ? 'Editar receita' : 'Nova receita', 'Cadastre o sabor, os ingredientes, embalagens, modo de preparo e custo do lote.') + '<form id="recipeForm" class="panel form-panel"><input type="hidden" name="id" value="' + esc(editing?.id || '') + '"><div class="form-grid two">' +
       field('Nome do sabor', '<input name="name" required value="' + esc(base.name || '') + '" placeholder="Ex.: Ninho com Nutella">') +
       field('Categoria do geladinho', '<select name="productCategoryId">' + productCategories().map(category => '<option value="' + esc(category.id) + '"' + (categoryFor(base).id === category.id ? ' selected' : '') + '>' + esc(category.name) + '</option>').join('') + '</select>', 'Organiza o cardápio do cliente. Você pode criar e editar categorias em Cadastros › Categorias de geladinho. Não muda custo, rendimento ou estoque.') +
       field('Rendimento do lote (un.)', '<input name="yieldUnits" required inputmode="decimal" value="' + esc(base.yieldUnits || '') + '">', 'Quantidade de geladinhos que esta receita completa produz.') +
@@ -1620,7 +1654,7 @@
       field('Mão de obra (R$)', '<input name="laborAmount" inputmode="decimal" value="' + esc(String(base.laborAmount || '').replace('.', ',')) + '">', 'Será incluída no custo do lote.') +
       field('Como calcular a mão de obra', '<select name="laborMode"><option value="batch"' + ((base.laborMode || 'batch') === 'batch' ? ' selected' : '') + '>Valor por lote</option><option value="unit"' + (base.laborMode === 'unit' ? ' selected' : '') + '>Valor por geladinho</option></select>') +
       field('Imagem do sabor', '<input name="image" type="file" accept="image/*">', 'Opcional. É usada somente no cardápio do cliente.') +
-      '</div><label class="form-field"><span>Descrição para o cliente' + info('Esta descrição aparece no cardápio que você compartilha com os clientes.', 'Descrição do cardápio') + '</span><textarea name="description" rows="3" placeholder="Ex.: Creme de leite Ninho com recheio de Nutella.">' + esc(base.description || '') + '</textarea></label><div class="catalog-switch"><label><input name="active" type="checkbox"' + (base.active !== false ? ' checked' : '') + '> Disponível no cardápio</label><span>Sabores marcados como disponíveis aparecem no cardápio, inclusive quando o estoque está zerado. O cliente só consegue escolher quando houver produção pronta.</span></div><div class="section-line"><div><h3>Ingredientes e embalagens</h3><p>Na própria linha: selecione o item, informe a quantidade e a unidade.</p></div></div><div class="recipe-table-title"><span>Item</span><span>Quantidade</span><span>Unidade</span><span></span></div><div class="recipe-items">' + recipeRows() + '</div><button type="button" class="outline full" data-action="add-recipe-line">+ Adicionar item abaixo</button><label class="form-field"><span>Modo de preparo</span><textarea name="preparation" rows="5" placeholder="Explique o preparo passo a passo.">' + esc(base.preparation || '') + '</textarea></label><section class="recipe-cost-summary"><div><span>Custo dos materiais</span><b id="recipeMaterialsPreview">' + money(estimation?.materialCost || 0) + '</b></div><div><span>Mão de obra</span><b id="recipeLaborPreview">' + money(estimation?.laborCost || 0) + '</b></div><div><span>Custo total do lote</span><b id="recipePreview">' + money(estimation?.batchCost || 0) + '</b></div><div><span>Custo por geladinho</span><b id="recipeUnitCostPreview">' + money(estimation?.unitCost || 0) + '</b></div><div class="recipe-profit"><span>Lucro bruto por geladinho</span><b id="recipeProfitPreview">' + money(estimation?.unitProfit || 0) + '</b><small id="recipeMarginPreview">' + (estimation ? estimation.margin.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '% da venda' : '—') + '</small></div><small id="recipeDetailPreview">' + (estimation ? 'Preço de venda: ' + money(estimation.saleUnitPrice) + '. Materiais e mão de obra já estão incluídos no custo.' : 'Complete rendimento, item, quantidade e unidade para calcular.') + '</small></section><div class="button-row"><button class="primary">Salvar receita</button>' + (editing ? '<button class="outline" type="button" data-action="cancel-recipe-edit">Cancelar</button>' : '') + '</div></form></section>';
+      '</div><label class="form-field"><span>Descrição para o cliente' + info('Esta descrição aparece no cardápio que você compartilha com os clientes.', 'Descrição do cardápio') + '</span><textarea name="description" rows="3" placeholder="Ex.: Creme de leite Ninho com recheio de Nutella.">' + esc(base.description || '') + '</textarea></label><div class="catalog-switch"><label><input name="active" type="checkbox"' + (base.active !== false ? ' checked' : '') + '> Disponível no cardápio</label><span>Sabores marcados como disponíveis aparecem no cardápio, inclusive quando o estoque está zerado. O cliente só consegue escolher quando houver produção pronta.</span></div><div class="catalog-switch"><label><input name="resaleEnabled" type="checkbox"' + (resaleEnabled ? ' checked' : '') + '> Disponível para revenda</label><span>Ative apenas os sabores que vocês entregam para revendedoras. Ao ativar, informe o valor fixo por unidade.</span></div>' + resaleFields + '<div class="section-line"><div><h3>Ingredientes e embalagens</h3><p>Na própria linha: selecione o item, informe a quantidade e a unidade.</p></div></div><div class="recipe-table-title"><span>Item</span><span>Quantidade</span><span>Unidade</span><span></span></div><div class="recipe-items">' + recipeRows() + '</div><button type="button" class="outline full" data-action="add-recipe-line">+ Adicionar item abaixo</button><label class="form-field"><span>Modo de preparo</span><textarea name="preparation" rows="5" placeholder="Explique o preparo passo a passo.">' + esc(base.preparation || '') + '</textarea></label><section class="recipe-cost-summary"><div><span>Custo dos materiais</span><b id="recipeMaterialsPreview">' + money(estimation?.materialCost || 0) + '</b></div><div><span>Mão de obra</span><b id="recipeLaborPreview">' + money(estimation?.laborCost || 0) + '</b></div><div><span>Custo total do lote</span><b id="recipePreview">' + money(estimation?.batchCost || 0) + '</b></div><div><span>Custo por geladinho</span><b id="recipeUnitCostPreview">' + money(estimation?.unitCost || 0) + '</b></div><div class="recipe-profit"><span>Lucro bruto por geladinho</span><b id="recipeProfitPreview">' + money(estimation?.unitProfit || 0) + '</b><small id="recipeMarginPreview">' + (estimation ? estimation.margin.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '% da venda' : '—') + '</small></div><small id="recipeDetailPreview">' + (estimation ? 'Preço de venda: ' + money(estimation.saleUnitPrice) + '. Materiais e mão de obra já estão incluídos no custo.' : 'Complete rendimento, item, quantidade e unidade para calcular.') + '</small></section><div class="button-row"><button class="primary">Salvar receita</button>' + (editing ? '<button class="outline" type="button" data-action="cancel-recipe-edit">Cancelar</button>' : '') + '</div></form></section>';
   }
   function productionScreen() {
     const selected = recipeById()[state.productionRecipe] || null;
@@ -1843,9 +1877,9 @@
     const photoUrl = mediaSource(recipe);
     const photo = photoUrl ? '<img class="recipe-view-image" src="' + esc(photoUrl) + '" alt="' + esc(recipe.name) + '">' : '';
     const financial = metrics
-      ? '<section class="recipe-cost-summary view"><div><span>Preço de venda</span><b>' + money(metrics.saleUnitPrice) + '</b></div><div><span>Materiais / lote</span><b>' + money(metrics.materialCost) + '</b></div><div><span>Mão de obra / lote</span><b>' + money(metrics.laborCost) + '</b></div><div><span>Custo / geladinho</span><b>' + money(metrics.unitCost) + '</b></div><div class="recipe-profit"><span>Lucro bruto / geladinho</span><b>' + money(metrics.unitProfit) + '</b><small>' + metrics.margin.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '% do preço de venda</small></div><small>Lucro bruto: preço de venda − custo dos materiais e mão de obra. O lucro real da empresa também considera despesas e frete no Financeiro.</small></section>'
+      ? '<section class="recipe-cost-summary view"><div><span>Preço de venda</span><b>' + money(metrics.saleUnitPrice) + '</b></div><div><span>Materiais / lote</span><b>' + money(metrics.materialCost) + '</b></div><div><span>Mão de obra / lote</span><b>' + money(metrics.laborCost) + '</b></div><div><span>Custo / geladinho</span><b>' + money(metrics.unitCost) + '</b></div><div class="recipe-profit"><span>Lucro bruto / geladinho</span><b>' + money(metrics.unitProfit) + '</b><small>' + metrics.margin.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '% do preço de venda</small></div>' + (metrics.resaleEnabled ? '<div class="recipe-profit"><span>Revenda: ' + money(metrics.resaleUnitPrice) + ' por unidade</span><b>Lucro na revenda: ' + money(metrics.resaleUnitProfit) + '</b><small>' + metrics.resaleMargin.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '% do preço de revenda</small></div>' : '') + '<small>Lucro bruto: preço de venda menos custo dos materiais e mão de obra. O lucro real da empresa também considera despesas e frete no Financeiro.</small></section>'
       : '<section class="panel caution"><b>Não foi possível calcular o custo.</b><p>' + esc(costError) + '</p></section>';
-    return '<section class="screen active">' + heading('Receitas', recipe.name, 'Visualização da receita, do preparo e da rentabilidade por geladinho.') + '<section class="panel recipe-view">' + photo + '<p class="recipe-view-description">' + esc(recipe.description || 'Sem descrição para o cardápio.').replace(/\n/g, '<br>') + '</p><dl><dt>Categoria</dt><dd>' + esc(categoryFor(recipe).name) + '</dd><dt>Rendimento do lote</dt><dd>' + qtyText(recipe.yieldUnits) + ' geladinhos</dd><dt>Estoque produzido</dt><dd>' + qtyText(product?.quantity || 0) + ' un.</dd><dt>Status no cardápio</dt><dd>' + (recipe.active === false ? 'Oculto' : 'Disponível') + '</dd></dl></section>' + financial + '<section class="panel recipe-view"><h2>Ingredientes e embalagens</h2><ul class="recipe-view-items">' + ingredientRows + '</ul></section><section class="panel recipe-view"><h2>Modo de preparo</h2><p class="recipe-preparation">' + esc(recipe.preparation || 'Modo de preparo não cadastrado.').replace(/\n/g, '<br>') + '</p></section><div class="button-row"><button class="primary" data-action="edit-recipe" data-id="' + esc(recipe.id) + '">Editar receita</button><button class="outline" data-route="records:catalog">Voltar ao cardápio</button></div></section>';
+    return '<section class="screen active">' + heading('Cadastros', recipe.name, 'Visualização da receita, do preparo e da rentabilidade por geladinho.') + '<section class="panel recipe-view">' + photo + '<p class="recipe-view-description">' + esc(recipe.description || 'Sem descrição para o cardápio.').replace(/\n/g, '<br>') + '</p><dl><dt>Categoria</dt><dd>' + esc(categoryFor(recipe).name) + '</dd><dt>Rendimento do lote</dt><dd>' + qtyText(recipe.yieldUnits) + ' geladinhos</dd><dt>Estoque produzido</dt><dd>' + qtyText(product?.quantity || 0) + ' un.</dd><dt>Status no cardápio</dt><dd>' + (recipe.active === false ? 'Oculto' : 'Disponível') + '</dd><dt>Disponível para revenda</dt><dd>' + (recipe.resaleEnabled === true ? 'Sim · ' + money(recipe.resaleUnitPrice) + ' por unidade' : 'Não') + '</dd></dl></section>' + financial + '<section class="panel recipe-view"><h2>Ingredientes e embalagens</h2><ul class="recipe-view-items">' + ingredientRows + '</ul></section><section class="panel recipe-view"><h2>Modo de preparo</h2><p class="recipe-preparation">' + esc(recipe.preparation || 'Modo de preparo não cadastrado.').replace(/\n/g, '<br>') + '</p></section><div class="button-row"><button class="primary" data-action="edit-recipe" data-id="' + esc(recipe.id) + '">Editar receita</button><button class="outline" data-route="records:catalog">Voltar ao cardápio</button></div></section>';
   }
   function catalogScreen() {
     const cards = data.recipes.slice().sort((a, b) => a.name.localeCompare(b.name)).map(recipe => {
@@ -1856,7 +1890,7 @@
       const photo = photoUrl ? '<div class="customer-preview"><img src="' + esc(photoUrl) + '" alt=""></div>' : '';
       let metrics = null;
       try { metrics = recipeMetrics(recipe); } catch (_) { /* A visualização explicará o item que falta. */ }
-      const profit = metrics ? '<p class="recipe-card-profit"><b>Lucro bruto por geladinho:</b> ' + money(metrics.unitProfit) + ' · ' + metrics.margin.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '%</p>' : '<p class="form-note">Complete os custos para calcular o lucro por geladinho.</p>';
+      const profit = metrics ? '<p class="recipe-card-profit"><b>Lucro bruto por geladinho:</b> ' + money(metrics.unitProfit) + ' · ' + metrics.margin.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '%' + (metrics.resaleEnabled ? '<br><b>Revenda:</b> ' + money(metrics.resaleUnitPrice) + ' · lucro ' + money(metrics.resaleUnitProfit) + ' por unidade' : '') + '</p>' : '<p class="form-note">Complete os custos para calcular o lucro por geladinho.</p>';
       return detail(recipe.name, source, money(recipe.saleUnitPrice), recipe.active === false ? 'oculto' : 'ativo', '<p>' + esc(recipe.description || 'Sem descrição para o cliente.').replace(/\n/g, '<br>') + '</p>' + photo + profit + '<p class="form-note">Sabor ativo aparece no cardápio mesmo sem estoque; quando estiver zerado, o cliente vê “esgotado” e não consegue selecionar.</p><div class="details-actions"><button class="secondary" data-action="view-recipe" data-id="' + esc(recipe.id) + '">Visualizar receita</button><button class="outline" data-action="edit-recipe" data-id="' + esc(recipe.id) + '">Editar sabor</button><button class="outline" data-action="toggle-catalog" data-id="' + esc(recipe.id) + '">' + (recipe.active === false ? 'Mostrar no cardápio' : 'Ocultar do cardápio') + '</button><button class="outline danger-button" data-action="delete-recipe" data-id="' + esc(recipe.id) + '">Excluir receita</button></div>');
     }).join('') || empty('Ainda não há sabores cadastrados.');
     return '<section class="screen active">' + heading('Cadastros', 'Cardápio e sabores', 'Cadastre, visualize e edite aqui os sabores que podem ser produzidos. Este é o cardápio usado pelo link do cliente.') + '<div class="isolated-actions"><button class="primary" data-action="new-recipe">Cadastrar novo sabor</button><button class="secondary" data-action="copy-catalog-link">Gerar link para o cliente</button></div><section class="panel"><p class="form-note">Todo sabor ativo aparece no cardápio do cliente. A quantidade disponível vem do Estoque produzido; com zero, ele fica visível como esgotado e sem seleção.</p></section><div class="list">' + cards + '</div></section>';
@@ -2149,7 +2183,7 @@
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=55';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=56';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -2158,12 +2192,12 @@
   }
   function managementCatalogLink() {
     const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    return base + 'customer.html?v=51&gestao=1';
+    return base + 'customer.html?v=56&gestao=1';
   }
   function noticesPanel() {
     if (!state.notices) return '';
-    const rows = data.notifications.slice(0, 30).map(item => '<button class="notice-row ' + (item.read ? 'read' : '') + '" data-action="open-notice" data-id="' + esc(item.id) + '"><b>' + esc(item.title) + '</b><span>' + esc(item.body) + '</span><small>' + new Date(item.date).toLocaleString('pt-BR') + '</small></button>').join('') || empty('Nenhuma notificação no momento.');
-    return '<aside class="notice-panel"><div class="section-line"><div><h2>Notificações</h2><p>Estoque mínimo e pagamentos pendentes.</p></div><button class="icon-button" data-action="close-notices" aria-label="Fechar notificações">×</button></div><button class="text-button" data-action="read-notices">Marcar todas como lidas</button><div class="notice-list">' + rows + '</div></aside>';
+    const rows = visibleNotifications().slice(0, 30).map(item => '<button class="notice-row ' + (item.read ? 'read' : '') + '" data-action="open-notice" data-id="' + esc(item.id) + '"><b>' + esc(item.title) + '</b><span>' + esc(item.body) + '</span><small>' + new Date(item.date).toLocaleString('pt-BR') + '</small></button>').join('') || empty('Nenhuma notificação no momento.');
+    return '<aside class="notice-panel"><div class="section-line"><div><h2>Notificações</h2><p>Atividades da equipe, pedidos de clientes e pendências importantes.</p></div><button class="icon-button" data-action="close-notices" aria-label="Fechar notificações">×</button></div><button class="text-button" data-action="read-notices">Marcar todas como lidas</button><div class="notice-list">' + rows + '</div></aside>';
   }
   function infoPanel() {
     if (!state.info) return '';
@@ -2486,12 +2520,12 @@
         if (meta.kind === 'scheduled') {
           const reservedText = qtyText(result.reservedQuantity || orderReservedQuantity(old));
           const pendingText = qtyText(result.pendingQuantity || orderPendingQuantity(old));
-          addNotice('order', 'Encomenda: ' + customer, reservedText + ' separado(s) · ' + pendingText + ' para produzir até ' + brDate(meta.scheduledFor) + '.', 'orders-history');
+          addNotice('order', 'Encomenda: ' + customer, reservedText + ' separado(s) · ' + pendingText + ' para produzir até ' + brDate(meta.scheduledFor) + '.', 'orders-history', '', currentActorId());
           toast(result.pendingQuantity > 0
             ? 'Encomenda salva: ' + reservedText + ' geladinho(s) já foram separados e ' + pendingText + ' ficaram pendentes de produção.'
             : 'Encomenda salva: todos os geladinhos já estavam prontos e foram separados.');
         } else {
-          addNotice('order', 'Pedido confirmado: ' + customer, 'Total de ' + money(total) + ' aguardando pagamento.', 'orders-history');
+          addNotice('order', 'Pedido confirmado: ' + customer, 'Total de ' + money(total) + ' aguardando pagamento.', 'orders-history', '', currentActorId());
           toast(old ? 'Pedido atualizado e estoque reservado novamente.' : 'Pedido confirmado e estoque reservado.');
         }
         save();
@@ -2517,7 +2551,9 @@
       phone: String(f.phone.value || '').trim(),
       city: String(f.city.value || '').trim(),
       paymentTerms: String(f.paymentTerms.value || '').trim(),
-      discountPercent: Math.max(0, Math.min(100, n(f.discountPercent.value))),
+      // O preço de revenda pertence ao sabor, não à revendedora. Mantemos o
+      // campo legado somente para não alterar vendas antigas já registradas.
+      discountPercent: Math.max(0, Math.min(100, n(existing?.discountPercent))),
       notes: String(f.notes.value || '').trim(),
       active: Boolean(f.active.checked),
       updatedAt: new Date().toISOString()
@@ -2555,7 +2591,7 @@
       const summary = resaleSummary();
       if (!reseller) { toast('Selecione a revendedora.'); return; }
       if (!summary.lines.length) { toast('Inclua pelo menos um sabor e uma quantidade.'); return; }
-      if (summary.lines.some(line => !(n(line.saleUnitPrice) > 0))) { toast('Informe um preço maior que zero para cada sabor.'); return; }
+      if (summary.lines.some(line => line.resaleEnabled !== true || !(n(line.saleUnitPrice) > 0))) { toast('Escolha apenas sabores liberados para revenda com preço fixo cadastrado.'); return; }
       if (summary.shortages.length) { toast('Confira o estoque disponível antes de confirmar a revenda.'); return; }
       if (!await confirmLatestStock()) return;
       const afterRefresh = resaleSummary();
@@ -2576,7 +2612,7 @@
           source: 'revenda', note: draft.note, paidAt: paid ? date : ''
         };
         data.orders.unshift(order);
-        addNotice(paid ? 'payment' : 'order', paid ? 'Revenda recebida: ' + reseller.name : 'Revenda a receber: ' + reseller.name, money(order.total) + (paid ? ' recebido em ' : ' com vencimento em ') + (paid ? draft.payment : brDate(order.dueDate)) + '.', paid ? 'reports-finance' : 'finance-receivable');
+        addNotice(paid ? 'payment' : 'order', paid ? 'Revenda recebida: ' + reseller.name : 'Revenda a receber: ' + reseller.name, money(order.total) + (paid ? ' recebido em ' : ' com vencimento em ') + (paid ? draft.payment : brDate(order.dueDate)) + '.', paid ? 'reports-finance' : 'finance-receivable', '', currentActorId());
         state.resaleLines = [{ productId: '', quantity: 1, saleUnitPrice: '' }];
         state.resaleDraft = null;
         save();
@@ -2616,6 +2652,7 @@
     item.movements.push({ id: uid(), purchaseId: purchase.id, kind: 'Compra', quantity, total, date, supplierId: supplier?.id || '', supplierName: supplier?.name || '', unitPrice, paymentMethod: f.payment.value });
     data.purchases.unshift(purchase);
     data.expenses.unshift({ id: uid(), name: 'Compra: ' + item.name, total, paymentMethod: f.payment.value, date, category: 'purchase', supplyId: item.id, purchaseId: purchase.id });
+    addNotice('stock', 'Compra registrada: ' + item.name, qtyText(quantity) + ' ' + item.unit + ' por ' + money(total) + (supplier?.name ? ' · ' + supplier.name : '') + '.', item.category === 'supply' ? 'stock-supply' : 'stock-ingredient', '', currentActorId());
     save();
     toast('Compra lançada. O custo médio foi atualizado.');
     navigate('stock:' + (item.category === 'supply' ? 'supply' : 'ingredient'));
@@ -2637,6 +2674,7 @@
     if (difference) item.movements.push({ id: uid(), kind: 'Ajuste manual', quantity: difference, total: 0, date: today(), reason, previousQuantity: n(item.quantity), resultingQuantity: quantity });
     Object.assign(item, { name: control(form, 'name').value.trim(), category: f.category.value, unit: f.unit.value.trim(), quantity, averageUnitCost: Math.max(0, n(f.averageUnitCost.value)), minimumStock: Math.max(0, n(f.minimumStock.value)), lastPurchaseAt: f.lastPurchaseAt.value, lastSupplierName: f.lastSupplierName.value.trim() });
     state.editSupply = '';
+    if (difference) addNotice('stock', 'Estoque ajustado: ' + item.name, 'A quantidade foi corrigida para ' + qtyText(quantity) + ' ' + item.unit + '.', item.category === 'supply' ? 'stock-supply' : 'stock-ingredient', '', currentActorId());
     save();
     toast('Item atualizado.');
     navigate('stock:' + (item.category === 'supply' ? 'supply' : 'ingredient'));
@@ -2664,6 +2702,10 @@
     const items = state.recipeLines.map(line => ({ supplyId: line.supplyId, quantity: n(line.quantity), unit: String(line.unit || '').trim() })).filter(line => line.supplyId && line.quantity > 0 && line.unit);
     if (!control(form, 'name').value.trim() || !(n(f.yieldUnits.value) > 0) || !(n(f.saleUnitPrice.value) >= 0) || !items.length) {
       toast('Preencha nome, rendimento, preço e pelo menos um ingrediente ou embalagem.');
+      return;
+    }
+    if (f.resaleEnabled.checked && !(n(f.resaleUnitPrice.value) > 0)) {
+      toast('Informe um valor por unidade maior que zero para a revenda.');
       return;
     }
     const recipeId = control(form, 'id').value;
@@ -2695,6 +2737,8 @@
         productType: selectedCategory.name,
         yieldUnits: n(f.yieldUnits.value),
         saleUnitPrice: n(f.saleUnitPrice.value),
+        resaleEnabled: f.resaleEnabled.checked,
+        resaleUnitPrice: f.resaleEnabled.checked ? n(f.resaleUnitPrice.value) : 0,
         laborAmount: Math.max(0, n(f.laborAmount.value)),
         laborMode: f.laborMode.value === 'unit' ? 'unit' : 'batch',
         description: f.description.value.trim(),
@@ -2719,6 +2763,7 @@
       state.recipeLinesLoaded = false;
       state.recipeLines = [{ supplyId: '', quantity: '', unit: '' }];
       state.recipeDraft = null;
+      addNotice('catalog', old ? 'Sabor atualizado: ' + recipe.name : 'Novo sabor cadastrado: ' + recipe.name, old ? 'A receita, preço ou disponibilidade foi alterada.' : 'O sabor já pode ser produzido e configurado para o cardápio.', 'records-catalog', '', currentActorId());
       save();
       toast('Receita salva com materiais e mão de obra.');
       navigate('records:catalog');
@@ -2770,8 +2815,9 @@
         // conciliará a alteração antes de enviar os demais dados.
         const result = createProduction(recipe, batches, date);
         data.productions.unshift({ id: uid(), recipeId: recipe.id, recipeName: recipe.name, batches, outputQuantity: result.outputQuantity, totalCost: result.totalCost, unitCost: result.unitCost, consumed: result.consumed, date });
-        save();
       }
+      addNotice('production', 'Produção registrada: ' + recipe.name, qtyText(n(recipe.yieldUnits) * batches) + ' geladinho(s) foram lançados no estoque produzido.', 'production', '', currentActorId());
+      save();
       state.productionBatches = '1';
       toast('Produção registrada e estoque atualizado.');
       render();
@@ -2798,6 +2844,7 @@
       const result = createProduction(recipe, batches, f.date.value || today(), true);
       Object.assign(old, { batches, date: f.date.value || today(), outputQuantity: result.outputQuantity, totalCost: result.totalCost, unitCost: result.unitCost, consumed: result.consumed });
       state.editProduction = '';
+      addNotice('production', 'Produção corrigida: ' + recipe.name, qtyText(result.outputQuantity) + ' geladinho(s) ficaram registrados na produção.', 'production', '', currentActorId());
       save();
       toast('Produção corrigida.');
       navigate('production');
@@ -3141,7 +3188,7 @@
     if (!order || order.status !== 'confirmed') return;
     order.status = 'paid';
     order.paidAt = today();
-    addNotice('payment', 'Pagamento recebido: ' + order.customer, money(order.total) + ' entrou em ' + order.paymentMethod + '.', 'reports-finance');
+    addNotice('payment', 'Pagamento recebido: ' + order.customer, money(order.total) + ' entrou em ' + order.paymentMethod + '.', 'reports-finance', '', currentActorId());
     save();
     toast('Pagamento registrado. Esta venda agora entra no faturamento e lucro.');
     render();
@@ -3161,7 +3208,7 @@
     order.status = 'confirmed';
     order.approvedAt = new Date().toISOString();
     order.reservationExpiresAt = '';
-    addNotice('order', 'Pedido aprovado: ' + order.customer, 'Total de ' + money(order.total) + ' aguardando pagamento.', 'orders-history');
+    addNotice('order', 'Pedido aprovado: ' + order.customer, 'Total de ' + money(order.total) + ' aguardando pagamento.', 'orders-history', '', currentActorId());
     save();
     toast('Pedido aprovado. Agora você pode separar e enviar a confirmação.');
     render();
@@ -3176,7 +3223,7 @@
     }
     order.status = 'production';
     order.productionStartedAt = new Date().toISOString();
-    addNotice('order', 'Encomenda em produção: ' + order.customer, 'Produza ' + qtyText(pending) + ' geladinho(s) pendente(s) para ' + brDate(order.scheduledFor || order.dueDate) + '.', 'production');
+    addNotice('order', 'Encomenda em produção: ' + order.customer, 'Produza ' + qtyText(pending) + ' geladinho(s) pendente(s) para ' + brDate(order.scheduledFor || order.dueDate) + '.', 'production', '', currentActorId());
     save();
     toast('Encomenda marcada como em produção. Os itens já separados continuam reservados; produza apenas o que falta.');
     render();
@@ -3192,9 +3239,9 @@
         order.status = 'confirmed';
         order.stockReserved = true;
         order.stockReservedAt = new Date().toISOString();
-        addNotice('order', 'Encomenda pronta para separar: ' + order.customer, 'Todos os itens foram reservados para ' + brDate(order.scheduledFor || order.dueDate) + '.', 'orders-history');
+        addNotice('order', 'Encomenda pronta para separar: ' + order.customer, 'Todos os itens foram reservados para ' + brDate(order.scheduledFor || order.dueDate) + '.', 'orders-history', '', currentActorId());
       } else {
-        addNotice('order', 'Reserva parcial atualizada: ' + order.customer, qtyText(result.reservedQuantity) + ' item(ns) separado(s); ainda faltam ' + qtyText(result.pendingQuantity) + '.', 'production');
+        addNotice('order', 'Reserva parcial atualizada: ' + order.customer, qtyText(result.reservedQuantity) + ' item(ns) separado(s); ainda faltam ' + qtyText(result.pendingQuantity) + '.', 'production', '', currentActorId());
       }
       save();
       toast(result.pendingQuantity <= 0
@@ -3645,9 +3692,9 @@
     if (action === 'cloud-auth-signin') { state.cloudAuthView = 'signin'; state.cloudAuthError = ''; render({ preserveScroll: true }); return; }
     if (action === 'open-notices') { state.notices = true; render(); return; }
     if (action === 'close-notices') { state.notices = false; render(); return; }
-    if (action === 'read-notices') { data.notifications.forEach(item => item.read = true); save(); render(); return; }
+    if (action === 'read-notices') { visibleNotifications().forEach(item => item.read = true); save(); render(); return; }
     if (action === 'open-notice') {
-      const notice = data.notifications.find(item => String(item.id) === String(id));
+      const notice = visibleNotifications().find(item => String(item.id) === String(id));
       if (notice) { notice.read = true; save(); navigate(notice.route || 'home'); }
       return;
     }
@@ -3828,6 +3875,11 @@
       updateRecipePreview();
       return;
     }
+    if (target.closest('#recipeForm') && target.name === 'resaleEnabled') {
+      state.recipeDraft = recipeDraftFromScreen();
+      render({ preserveScroll: true });
+      return;
+    }
     if (target.matches('[data-recipe-quantity]')) { state.recipeLines[n(target.dataset.recipeQuantity)].quantity = target.value; updateRecipePreview(); return; }
     if (target.matches('[data-recipe-unit]')) { state.recipeLines[n(target.dataset.recipeUnit)].unit = target.value; updateRecipePreview(); return; }
     if (target.matches('[data-pick]')) {
@@ -3862,7 +3914,7 @@
     }
     if (target.matches('[data-recipe-quantity]')) { state.recipeLines[n(target.dataset.recipeQuantity)].quantity = target.value; updateRecipePreview(); }
     if (target.matches('[data-recipe-unit]')) { state.recipeLines[n(target.dataset.recipeUnit)].unit = target.value; updateRecipePreview(); }
-    if (target.closest('#recipeForm') && ['yieldUnits', 'laborAmount', 'laborMode'].includes(target.name)) updateRecipePreview();
+    if (target.closest('#recipeForm') && ['yieldUnits', 'saleUnitPrice', 'resaleUnitPrice', 'laborAmount', 'laborMode'].includes(target.name)) updateRecipePreview();
   });
   document.addEventListener('submit', event => {
     event.preventDefault();
@@ -3929,7 +3981,7 @@
     const updateButton = $('#appUpdate');
     const showUpdate = () => { if (updateButton) updateButton.hidden = false; };
     updateButton?.addEventListener('click', () => location.reload());
-    navigator.serviceWorker.register('./service-worker.js?v=51').then(registration => {
+    navigator.serviceWorker.register('./service-worker.js?v=56').then(registration => {
       // Solicita a checagem mesmo em quem abre o atalho instalado há semanas.
       registration.update().catch(() => {});
       if (registration.waiting) showUpdate();
