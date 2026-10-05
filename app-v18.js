@@ -321,7 +321,18 @@
       expenses: Array.isArray(old.expenses) ? old.expenses : [],
       openingFinancial: normalizeOpeningFinancial(old.openingFinancial),
       suppliers: Array.isArray(old.suppliers) ? old.suppliers : [],
-      purchases: Array.isArray(old.purchases) ? old.purchases : [],
+      // Cada compra passa a guardar rastreabilidade própria. O saldo do item
+      // continua agregado para os cálculos de receita, mas lote e validade
+      // permanecem visíveis no histórico de cada entrada.
+      purchases: Array.isArray(old.purchases) ? old.purchases.map(purchase => ({
+        ...purchase,
+        lotNumber: Math.max(0, Math.floor(n(purchase.lotNumber))),
+        lotCode: String(purchase.lotCode || (n(purchase.lotNumber) > 0 ? 'Lote ' + Math.floor(n(purchase.lotNumber)) : '')),
+        expiryDate: /^\d{4}-\d{2}-\d{2}$/.test(String(purchase.expiryDate || '')) ? String(purchase.expiryDate) : '',
+        // Compras antigas não tinham esse campo; não vamos obrigar a equipe a
+        // voltar e preencher validade de registros já concluídos.
+        expiryNotApplicable: purchase.expiryNotApplicable === true || (!purchase.expiryDate && purchase.expiryNotApplicable !== false)
+      })) : [],
       resellers: Array.isArray(old.resellers) ? old.resellers.map(item => ({
         ...item,
         id: item.id || uid(),
@@ -362,7 +373,7 @@
       'category-edit': 'records-categories'
     };
     const screen = fallback[String(value || '')] || String(value || '');
-    return /^(home|orders-(new|history)|stock-(purchase|ingredient|supply|ready)|recipes|production|finance-(overview|receivable|payable|opening|opening-receive|opening-pay)|reports-(orders|finance|stock)|records-(catalog|suppliers|categories)|resale-(dashboard|new|history|people)|tools-(compare|capacity)|settings-(home|cloud|team|appearance|message|catalog|delivery|backup|restore-preview))$/.test(screen) ? screen : 'home';
+    return /^(home|orders-(new|history|calendar)|stock-(purchase|ingredient|supply|ready)|recipes|production|finance-(overview|receivable|payable|opening|opening-receive|opening-pay)|reports-(orders|finance|stock)|records-(catalog|suppliers|categories)|resale-(dashboard|new|history|people)|tools-(compare|capacity)|settings-(home|cloud|team|appearance|message|catalog|delivery|backup|restore-preview))$/.test(screen) ? screen : 'home';
   }
   function loadLastScreen() {
     try { return resumableScreen(localStorage.getItem(LAST_SCREEN_KEY)); }
@@ -411,6 +422,7 @@
     info: null,
     orderLines: [{ productId: '', quantity: 1, discountPerUnit: 0 }],
     orderDraft: null,
+    purchaseDraft: null,
     resaleLines: [{ productId: '', quantity: 1, saleUnitPrice: '' }],
     resaleDraft: null,
     editReseller: '',
@@ -999,7 +1011,7 @@
     if (needsAuth) return '<div class="auth-shell">' + settingsScreen() + '</div><div id="toast" role="status" aria-live="polite"></div>';
     const unread = visibleNotifications().filter(item => !item.read).length;
     return '<div class="app-shell"><header class="topbar"><button class="icon-button" data-action="open-menu" aria-label="Abrir menu">☰</button><img class="brand" src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="bell-button" data-action="open-notices" aria-label="Notificações">🔔' + (unread ? '<b>' + unread + '</b>' : '') + '</button><button id="installCta" class="install-cta" hidden>Instalar</button></header><div class="drawer-shade" data-action="close-menu"></div><aside class="drawer"><div class="drawer-brand"><img src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="icon-button" data-action="close-menu" aria-label="Fechar menu">×</button></div><nav><button class="nav-home" data-route="home">Tela inicial</button>' +
-      navGroup('Controle de pedidos', 'orders', [['Novo pedido', 'orders:new'], ['Pedidos realizados', 'orders:history']]) +
+      navGroup('Controle de pedidos', 'orders', [['Novo pedido', 'orders:new'], ['Pedidos realizados', 'orders:history'], ['Programação de encomendas', 'orders:calendar']]) +
       navGroup('Controle de estoque', 'stock', [['Estoque produzido', 'stock:ready'], ['Estoque de insumos', 'stock:supply'], ['Estoque de ingredientes', 'stock:ingredient'], ['Produções', 'production']]) +
       navGroup('Revendas', 'resale', [['Visão das revendas', 'resale:dashboard'], ['Nova venda para revenda', 'resale:new'], ['Vendas para revenda', 'resale:history'], ['Cadastro de revendedores', 'resale:people']]) +
       navGroup('Financeiro', 'finance', [['Visão financeira', 'finance:overview'], ['Contas a receber', 'finance:receivable'], ['Contas pagas', 'finance:payable'], ['Fechamento inicial', 'finance:opening']]) +
@@ -1044,7 +1056,7 @@
   }
   function screen() {
     if (state.screen === 'home') return homeScreen();
-    if (state.screen === 'orders-new' || state.screen === 'orders-history') return ordersScreen();
+    if (state.screen === 'orders-new' || state.screen === 'orders-history' || state.screen === 'orders-calendar') return ordersScreen();
     if (state.screen === 'order-edit') return orderEditScreen();
     if (state.screen === 'stock-purchase' || state.screen === 'stock-ingredient' || state.screen === 'stock-supply' || state.screen === 'stock-ready') return stockScreen();
     if (state.screen === 'stock-ready-manual') return manualReadyScreen();
@@ -1173,6 +1185,37 @@
     if (!form) return;
     state.orderDraft = orderDraftFromForm(form);
   }
+  function purchaseDraftFromForm(form = $('#purchaseForm')) {
+    if (!form) return state.purchaseDraft || {};
+    const f = form.elements;
+    return {
+      supplyId: f.supplyId?.value || '',
+      newName: f.newName?.value || '',
+      category: f.category?.value === 'supply' ? 'supply' : 'ingredient',
+      unit: f.unit?.value || 'un.',
+      minimumStock: f.minimumStock?.value || '',
+      supplierId: f.supplierId?.value || '',
+      quantity: f.quantity?.value || '',
+      total: f.total?.value || '',
+      payment: f.payment?.value || 'Pix',
+      date: f.date?.value || today(),
+      expiryDate: f.expiryDate?.value || '',
+      expiryNotApplicable: Boolean(f.expiryNotApplicable?.checked)
+    };
+  }
+  function nextPurchaseLot(itemId) {
+    if (!itemId) return 1;
+    const history = data.purchases.filter(purchase => String(purchase.supplyId) === String(itemId));
+    const explicitLast = history.reduce((maximum, purchase) => Math.max(maximum, Math.floor(n(purchase.lotNumber))), 0);
+    // Compras antigas não possuíam lote. Elas ainda contam para não reiniciar a
+    // sequência ao ativar esta função em um item que já tinha histórico.
+    const rememberedLast = Math.floor(n(supplies()[itemId]?.lastLotNumber));
+    return Math.max(explicitLast, history.length, rememberedLast) + 1;
+  }
+  function expiryText(entry) {
+    if (entry?.expiryNotApplicable === true) return 'N/A';
+    return entry?.expiryDate ? brDate(entry.expiryDate) : 'não informada';
+  }
   function lineReservedQuantity(order, line) {
     const quantity = Math.max(0, qty(line?.quantity));
     if (order?.orderKind !== 'scheduled') return quantity;
@@ -1226,7 +1269,10 @@
     if (order.status === 'reserved') actions += '<button class="primary" data-action="approve-order" data-id="' + esc(order.id) + '">Aprovar pedido</button>';
     if (order.status === 'scheduled') actions += '<button class="primary" data-action="start-scheduled-production" data-id="' + esc(order.id) + '">Marcar em produção</button>';
     if (order.status === 'production') actions += '<button class="primary" data-action="reserve-scheduled-order" data-id="' + esc(order.id) + '">Reservar itens pendentes</button>';
-    if (order.status === 'confirmed' || order.status === 'paid') actions += '<button class="secondary" data-action="send-order" data-id="' + esc(order.id) + '">Enviar confirmação</button>';
+    // A confirmação comercial não depende de todos os geladinhos estarem
+    // prontos. Em encomendas, ela informa o cliente que o pedido foi recebido
+    // enquanto a equipe acompanha a produção neste mesmo cartão.
+    if (!locked) actions += '<button class="secondary" data-action="send-order" data-id="' + esc(order.id) + '">Enviar confirmação</button>';
     if (order.status === 'confirmed') actions += '<button class="primary" data-action="mark-paid" data-id="' + esc(order.id) + '">Marcar como pago</button>';
     if (!locked) actions += '<button class="outline" data-action="cancel-order" data-id="' + esc(order.id) + '">Cancelar</button>';
     actions += '<button class="outline danger-button" data-action="delete-order" data-id="' + esc(order.id) + '">Arquivar</button>';
@@ -1355,7 +1401,55 @@
       toast('Não foi possível obter a localização. Você pode continuar preenchendo o endereço.');
     }, { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 });
   }
+  function scheduledOrdersOn(date) {
+    return data.orders
+      .filter(order => !order.archived && order.source !== 'revenda' && order.orderKind === 'scheduled' && !['cancelled', 'expired'].includes(order.status) && String(order.scheduledFor || order.dueDate) === String(date))
+      .sort((a, b) => String(a.customer || '').localeCompare(String(b.customer || ''), 'pt-BR'));
+  }
+  function calendarCursor() {
+    const value = String(state.scheduleMonth || '');
+    if (/^\d{4}-\d{2}$/.test(value)) {
+      const [year, month] = value.split('-').map(Number);
+      return new Date(year, month - 1, 1);
+    }
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+  function calendarMonthKey(date) {
+    return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0');
+  }
+  function calendarDayKey(date) {
+    return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
+  }
+  function orderCalendarScreen() {
+    const cursor = calendarCursor();
+    const monthKey = calendarMonthKey(cursor);
+    const selected = /^\d{4}-\d{2}-\d{2}$/.test(String(state.scheduleDay || '')) && String(state.scheduleDay).startsWith(monthKey)
+      ? String(state.scheduleDay)
+      : today().startsWith(monthKey) ? today() : monthKey + '-01';
+    const startWeekday = (new Date(cursor.getFullYear(), cursor.getMonth(), 1).getDay() + 6) % 7;
+    const days = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+    const leading = Array.from({ length: startWeekday }, () => '<span class="schedule-calendar-empty" aria-hidden="true"></span>').join('');
+    const cells = Array.from({ length: days }, (_, offset) => {
+      const key = monthKey + '-' + String(offset + 1).padStart(2, '0');
+      const orders = scheduledOrdersOn(key);
+      const count = orders.length;
+      const classes = ['schedule-day'];
+      if (key === selected) classes.push('selected');
+      if (key === today()) classes.push('today');
+      if (count) classes.push('has-orders');
+      return '<button type="button" class="' + classes.join(' ') + '" data-action="select-schedule-day" data-date="' + key + '"><b>' + (offset + 1) + '</b>' + (count ? '<span>' + count + (count === 1 ? ' encomenda' : ' encomendas') + '</span>' : '<small>—</small>') + '</button>';
+    }).join('');
+    const selectedOrders = scheduledOrdersOn(selected);
+    const label = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(cursor);
+    const selectedLabel = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }).format(new Date(selected + 'T12:00:00'));
+    const list = selectedOrders.map(orderCard).join('') || empty('Nenhuma encomenda programada para este dia.');
+    return '<section class="screen active">' + heading('Controle de pedidos', 'Programação de encomendas', 'Escolha um dia para ver os pedidos previstos. Toque no pedido para abrir os detalhes, produção e confirmação.') +
+      '<section class="panel schedule-panel"><div class="schedule-toolbar"><button type="button" class="outline" data-action="shift-schedule-month" data-offset="-1" aria-label="Mês anterior">←</button><h2>' + esc(label.charAt(0).toUpperCase() + label.slice(1)) + '</h2><button type="button" class="outline" data-action="shift-schedule-month" data-offset="1" aria-label="Próximo mês">→</button></div><button type="button" class="text-button schedule-today" data-action="schedule-today">Ir para hoje</button><div class="schedule-weekdays"><span>Seg</span><span>Ter</span><span>Qua</span><span>Qui</span><span>Sex</span><span>Sáb</span><span>Dom</span></div><div class="schedule-calendar">' + leading + cells + '</div></section>' +
+      '<section class="schedule-day-orders"><div class="section-line"><div><h2>' + esc(selectedLabel.charAt(0).toUpperCase() + selectedLabel.slice(1)) + '</h2><p>' + (selectedOrders.length ? selectedOrders.length + (selectedOrders.length === 1 ? ' encomenda programada.' : ' encomendas programadas.') : 'Sem entregas ou retiradas programadas.') + '</p></div></div><div class="list">' + list + '</div></section></section>';
+  }
   function ordersScreen() {
+    if (state.screen === 'orders-calendar') return orderCalendarScreen();
     if (state.screen === 'orders-history') {
       const cards = data.orders.filter(order => !order.archived && order.source !== 'revenda').slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(orderCard).join('') || empty('Nenhum pedido criado ainda.');
       return '<section class="screen active">' + heading('Controle de pedidos', 'Pedidos realizados', 'Acompanhe encomendas, produção, reservas, pagamento e separação. O histórico financeiro continua preservado.') + '<div class="list">' + cards + '</div></section>';
@@ -1517,24 +1611,39 @@
       const moves = item.movements.slice(-8).reverse().map(move => '<li>' + brDate(move.date) + ' · ' + esc(move.kind) + ' · ' + (n(move.quantity) >= 0 ? '+' : '') + qtyText(move.quantity) + ' ' + esc(item.unit) + (move.reason ? ' · ' + esc(move.reason) : '') + '</li>').join('') || '<li>Sem movimentações.</li>';
       const prices = purchaseStats(item);
       const priceSummary = prices.priced.length ? '<dt>Menor preço pago</dt><dd>' + money(prices.lowestEntry.unitPrice) + ' / ' + esc(item.unit) + '</dd><dt>Média das compras</dt><dd>' + money(prices.weightedAverage) + ' / ' + esc(item.unit) + '</dd>' : '<dt>Histórico de preços</dt><dd>Sem compras registradas</dd>';
-      return detail(item.name, 'Quantidade: ' + qtyText(item.quantity) + ' ' + esc(item.unit) + ' · mínimo: ' + qtyText(item.minimumStock), money(item.averageUnitCost) + '/' + esc(item.unit), n(item.minimumStock) > 0 && n(item.quantity) <= n(item.minimumStock) ? 'mínimo' : 'em estoque', '<dl><dt>Quantidade atual</dt><dd>' + qtyText(item.quantity) + ' ' + esc(item.unit) + '</dd><dt>Custo médio do estoque</dt><dd>' + money(item.averageUnitCost) + ' / ' + esc(item.unit) + '</dd><dt>Valor em estoque</dt><dd>' + money(n(item.quantity) * n(item.averageUnitCost)) + '</dd><dt>Última compra</dt><dd>' + brDate(item.lastPurchaseAt) + '</dd><dt>Fornecedor</dt><dd>' + esc(item.lastSupplierName || '—') + '</dd>' + priceSummary + '</dl><h4>Movimentações recentes</h4><ul>' + moves + '</ul><div class="details-actions"><button class="secondary" data-action="inspect-price" data-id="' + esc(item.id) + '">Consultar preços</button><button class="outline" data-action="edit-supply" data-id="' + esc(item.id) + '">Editar</button><button class="outline danger-button" data-action="delete-supply" data-id="' + esc(item.id) + '">Excluir</button></div>');
+      const lots = prices.history.slice(0, 5).map(entry => '<li><b>' + esc(entry.lotCode || 'Lote não informado') + '</b><span>' + brDate(entry.date) + ' · validade: ' + esc(expiryText(entry)) + ' · ' + qtyText(entry.quantity) + ' ' + esc(item.unit) + '</span></li>').join('') || '<li>As próximas compras aparecerão aqui com lote e validade.</li>';
+      const latestLot = prices.latest?.lotCode ? '<dt>Último lote</dt><dd>' + esc(prices.latest.lotCode) + '</dd><dt>Validade do último lote</dt><dd>' + esc(expiryText(prices.latest)) + '</dd>' : '';
+      return detail(item.name, 'Quantidade: ' + qtyText(item.quantity) + ' ' + esc(item.unit) + ' · mínimo: ' + qtyText(item.minimumStock), money(item.averageUnitCost) + '/' + esc(item.unit), n(item.minimumStock) > 0 && n(item.quantity) <= n(item.minimumStock) ? 'mínimo' : 'em estoque', '<dl><dt>Quantidade atual</dt><dd>' + qtyText(item.quantity) + ' ' + esc(item.unit) + '</dd><dt>Custo médio do estoque</dt><dd>' + money(item.averageUnitCost) + ' / ' + esc(item.unit) + '</dd><dt>Valor em estoque</dt><dd>' + money(n(item.quantity) * n(item.averageUnitCost)) + '</dd><dt>Última compra</dt><dd>' + brDate(item.lastPurchaseAt) + '</dd><dt>Fornecedor</dt><dd>' + esc(item.lastSupplierName || '—') + '</dd>' + latestLot + priceSummary + '</dl><h4>Compras, lotes e validade</h4><ul class="lot-history">' + lots + '</ul><h4>Movimentações recentes</h4><ul>' + moves + '</ul><div class="details-actions"><button class="secondary" data-action="inspect-price" data-id="' + esc(item.id) + '">Consultar preços</button><button class="outline" data-action="edit-supply" data-id="' + esc(item.id) + '">Editar</button><button class="outline danger-button" data-action="delete-supply" data-id="' + esc(item.id) + '">Excluir</button></div>');
     }).join('') || empty('Nenhum item cadastrado.');
     const archived = data.supplies.filter(item => item.category === category && item.active === false).map(item => '<li><b>' + esc(item.name) + '</b><span>Histórico preservado</span><button class="outline" data-action="restore-supply" data-id="' + esc(item.id) + '">Reativar</button></li>').join('');
     return '<section class="screen active">' + heading('Controle de estoque', label, 'Toque em um item para conferir movimentações ou editar todas as informações.') + '<div class="isolated-actions"><button class="primary" data-route="stock:purchase">Cadastrar nova compra</button></div><div class="list">' + cards + '</div>' + (archived ? '<details class="panel archived-list"><summary>Itens arquivados</summary><ul>' + archived + '</ul></details>' : '') + '</section>';
   }
   function purchaseScreen() {
+    const draft = {
+      supplyId: '', newName: '', category: 'ingredient', unit: 'un.', minimumStock: '', supplierId: '',
+      quantity: '', total: '', payment: 'Pix', date: today(), expiryDate: '', expiryNotApplicable: false,
+      ...(state.purchaseDraft || {})
+    };
+    const selectedItem = draft.supplyId ? supplies()[draft.supplyId] : null;
+    const lotNumber = nextPurchaseLot(selectedItem?.id);
+    const expiryDisabled = draft.expiryNotApplicable ? ' disabled' : '';
+    const selectedHelp = selectedItem
+      ? '<section class="form-note lot-note"><b>Comprando novamente:</b> este lançamento será registrado como <b>Lote ' + lotNumber + '</b> de ' + esc(selectedItem.name) + '.</section>'
+      : '<section class="form-note lot-note"><b>Novo item:</b> ao salvar, esta primeira compra receberá automaticamente o <b>Lote 1</b>.</section>';
     return '<section class="screen active">' + heading('Controle de estoque', 'Cadastrar compra', 'Registre a entrada uma vez. O custo médio e o financeiro são atualizados automaticamente.') + '<form id="purchaseForm" class="panel form-panel"><div class="form-grid two">' +
-      field('Item já cadastrado', '<select name="supplyId">' + options(activeSupplies().slice().sort((a, b) => a.name.localeCompare(b.name)), '', item => item.name + ' (' + qtyText(item.quantity) + ' ' + item.unit + ')') + '</select>', 'Selecione aqui quando estiver comprando novamente algo que já existe.') +
-      field('Ou nome do novo item', '<input name="newName" placeholder="Ex.: Leite integral">', 'Preencha somente se este item ainda não foi cadastrado.') +
-      field('Tipo do novo item', '<select name="category"><option value="ingredient">Ingrediente</option><option value="supply">Insumo / embalagem</option></select>') +
-      field('Unidade de medida', '<select name="unit"><option>un.</option><option>pacote</option><option>L</option><option>ml</option><option>kg</option><option>g</option><option>rolo</option><option>caixa</option></select>') +
-      field('Estoque mínimo', '<input name="minimumStock" inputmode="decimal" placeholder="Ex.: 5">', 'Quando a quantidade chegar a este número, o sino mostrará um aviso.') +
-      field('Fornecedor', '<select name="supplierId">' + options(data.suppliers, '') + '</select>') +
-      field('Quantidade comprada', '<input name="quantity" required inputmode="decimal" placeholder="Ex.: 2">') +
-      field('Total pago (R$)', '<input name="total" required inputmode="decimal" placeholder="Ex.: 5,98">', 'É o total da compra, não o preço de cada unidade.') +
-      field('Pago com', '<select name="payment">' + METHODS.map(method => '<option>' + method + '</option>').join('') + '</select>') +
-      field('Data da compra', '<input name="date" type="date" value="' + today() + '">') +
-      '</div><button class="primary full">Lançar compra no estoque</button></form><p class="form-note">Não encontrou o fornecedor? Cadastre-o em Cadastros › Fornecedores.</p></section>';
+      field('Item já cadastrado', '<select name="supplyId">' + options(activeSupplies().slice().sort((a, b) => a.name.localeCompare(b.name)), draft.supplyId, item => item.name + ' (' + qtyText(item.quantity) + ' ' + item.unit + ')') + '</select>', 'Selecione aqui quando estiver comprando novamente algo que já existe.') +
+      field('Ou nome do novo item', '<input name="newName" value="' + esc(draft.newName) + '" placeholder="Ex.: Leite integral">', 'Preencha somente se este item ainda não foi cadastrado.') +
+      field('Tipo do novo item', '<select name="category"><option value="ingredient"' + (draft.category === 'ingredient' ? ' selected' : '') + '>Ingrediente</option><option value="supply"' + (draft.category === 'supply' ? ' selected' : '') + '>Insumo / embalagem</option></select>') +
+      field('Unidade de medida', '<select name="unit">' + ['un.', 'pacote', 'L', 'ml', 'kg', 'g', 'rolo', 'caixa'].map(unit => '<option' + (draft.unit === unit ? ' selected' : '') + '>' + unit + '</option>').join('') + '</select>') +
+      field('Estoque mínimo', '<input name="minimumStock" inputmode="decimal" value="' + esc(draft.minimumStock) + '" placeholder="Ex.: 5">', 'Quando a quantidade chegar a este número, o sino mostrará um aviso.') +
+      field('Fornecedor', '<select name="supplierId">' + options(data.suppliers, draft.supplierId) + '</select>') +
+      field('Lote interno', '<div class="readonly-field"><b>Lote ' + lotNumber + '</b><small>Gerado automaticamente para este item. A próxima compra receberá o número seguinte.</small></div>', 'Ajuda a localizar uma compra específica, como “Lote 2” do leite condensado.') +
+      field('Validade', '<input name="expiryDate" type="date" value="' + esc(draft.expiryDate) + '"' + expiryDisabled + '>', 'Obrigatória para itens com validade. Marque N/A quando o item não tiver prazo de validade.') +
+      field('Quantidade comprada', '<input name="quantity" required inputmode="decimal" value="' + esc(draft.quantity) + '" placeholder="Ex.: 2">') +
+      field('Total pago (R$)', '<input name="total" required inputmode="decimal" value="' + esc(draft.total) + '" placeholder="Ex.: 5,98">', 'É o total da compra, não o preço de cada unidade.') +
+      field('Pago com', '<select name="payment">' + METHODS.map(method => '<option' + (draft.payment === method ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') +
+      field('Data da compra', '<input name="date" type="date" value="' + esc(draft.date) + '">') +
+      '</div><label class="catalog-switch expiry-switch"><input name="expiryNotApplicable" type="checkbox"' + (draft.expiryNotApplicable ? ' checked' : '') + '> Validade N/A (não se aplica a este item)</label>' + selectedHelp + '<button class="primary full">Lançar compra no estoque</button></form><p class="form-note">Não encontrou o fornecedor? Cadastre-o em Cadastros › Fornecedores.</p></section>';
   }
   function readyScreen() {
     const cards = data.readyStock.slice().sort((a, b) => a.name.localeCompare(b.name)).map(item => {
@@ -1557,6 +1666,10 @@
   function supplyEditScreen() {
     const item = supplies()[state.editSupply];
     if (!item) return '<section class="screen active">' + empty('Item não encontrado.') + '</section>';
+    const latestPurchase = purchaseStats(item).latest;
+    const traceability = latestPurchase
+      ? '<div class="readonly-field"><b>' + esc(latestPurchase.lotCode || 'Lote não informado') + '</b><small>Validade: ' + esc(expiryText(latestPurchase)) + ' · compra em ' + brDate(latestPurchase.date) + '</small></div>'
+      : '<div class="readonly-field"><b>Sem lote ainda</b><small>O lote será criado automaticamente na primeira compra registrada.</small></div>';
     return '<section class="screen active">' + heading('Controle de estoque', 'Editar ' + item.name, 'Altere todas as informações de uma vez. A correção de quantidade ficará registrada no histórico.') + '<form id="supplyEditForm" class="panel form-panel"><input type="hidden" name="id" value="' + esc(item.id) + '"><div class="form-grid two">' +
       field('Nome', '<input name="name" required value="' + esc(item.name) + '">') +
       field('Tipo', '<select name="category"><option value="ingredient"' + (item.category === 'ingredient' ? ' selected' : '') + '>Ingrediente</option><option value="supply"' + (item.category === 'supply' ? ' selected' : '') + '>Insumo / embalagem</option></select>') +
@@ -1566,6 +1679,7 @@
       field('Estoque mínimo', '<input name="minimumStock" inputmode="decimal" value="' + esc(qtyInput(item.minimumStock)) + '">') +
       field('Data da última compra', '<input name="lastPurchaseAt" type="date" value="' + esc(item.lastPurchaseAt || '') + '">') +
       field('Fornecedor da última compra', '<input name="lastSupplierName" value="' + esc(item.lastSupplierName || '') + '">') +
+      field('Último lote e validade', traceability, 'Lote e validade são definidos na compra. Para corrigir uma compra antiga, registre a correção no histórico em vez de alterar este campo.') +
       '</div><label class="form-field"><span>Motivo da correção de quantidade' + info('Obrigatório somente se a quantidade atual for alterada. Fica no histórico para vocês saberem por que o saldo mudou.', 'Ajuste de estoque') + '</span><textarea name="adjustmentReason" rows="2" placeholder="Ex.: conferência física, perda, item vencido"></textarea></label><div class="button-row"><button class="primary">Salvar todas as alterações</button><button class="outline" type="button" data-route="stock:' + (item.category === 'supply' ? 'supply' : 'ingredient') + '">Cancelar</button><button class="outline danger-button" type="button" data-action="delete-supply" data-id="' + esc(item.id) + '">Excluir cadastro</button></div></form></section>';
   }
   function readyEditScreen() {
@@ -1950,7 +2064,11 @@
       return {
         id: entry.id || uid(), date: entry.date || '', quantity, total, unitPrice,
         supplierId: entry.supplierId || '', supplierName: entry.supplierName || item.lastSupplierName || 'Fornecedor não informado',
-        paymentMethod: entry.paymentMethod || ''
+        paymentMethod: entry.paymentMethod || '',
+        lotNumber: Math.max(0, Math.floor(n(entry.lotNumber))),
+        lotCode: String(entry.lotCode || (n(entry.lotNumber) > 0 ? 'Lote ' + Math.floor(n(entry.lotNumber)) : '')),
+        expiryDate: /^\d{4}-\d{2}-\d{2}$/.test(String(entry.expiryDate || '')) ? String(entry.expiryDate) : '',
+        expiryNotApplicable: entry.expiryNotApplicable === true || (!entry.expiryDate && entry.expiryNotApplicable !== false)
       };
     }).filter(entry => entry.quantity > 0 && entry.unitPrice >= 0).sort((a, b) => String(b.date).localeCompare(String(a.date)));
   }
@@ -2188,7 +2306,7 @@
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=57';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=58';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -2197,7 +2315,7 @@
   }
   function managementCatalogLink() {
     const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    return base + 'customer.html?v=57&gestao=1';
+    return base + 'customer.html?v=58&gestao=1';
   }
   function noticesPanel() {
     if (!state.notices) return '';
@@ -2635,8 +2753,14 @@
     const total = n(f.total.value);
     const selected = f.supplyId.value;
     const newName = f.newName.value.trim();
+    const expiryNotApplicable = Boolean(f.expiryNotApplicable?.checked);
+    const expiryDate = expiryNotApplicable ? '' : String(f.expiryDate?.value || '');
     if (!(quantity > 0) || !(total >= 0) || (!selected && !newName)) {
       toast('Informe o item, a quantidade e o total pago.');
+      return;
+    }
+    if (!expiryNotApplicable && !/^\d{4}-\d{2}-\d{2}$/.test(expiryDate)) {
+      toast('Informe a validade do item ou marque “Validade N/A”.');
       return;
     }
     let item = selected ? supplies()[selected] : null;
@@ -2653,13 +2777,20 @@
     item.lastPurchaseAt = date;
     item.lastPurchaseTotal = total;
     item.lastSupplierName = supplier?.name || '';
-    const purchase = { id: uid(), supplyId: item.id, supplyName: item.name, supplierId: supplier?.id || '', supplierName: supplier?.name || '', quantity, unit: item.unit, total, unitPrice, date, paymentMethod: f.payment.value };
-    item.movements.push({ id: uid(), purchaseId: purchase.id, kind: 'Compra', quantity, total, date, supplierId: supplier?.id || '', supplierName: supplier?.name || '', unitPrice, paymentMethod: f.payment.value });
+    const lotNumber = nextPurchaseLot(item.id);
+    const lotCode = 'Lote ' + lotNumber;
+    item.lastLotNumber = lotNumber;
+    item.lastLotCode = lotCode;
+    item.lastExpiryDate = expiryDate;
+    item.lastExpiryNotApplicable = expiryNotApplicable;
+    const purchase = { id: uid(), supplyId: item.id, supplyName: item.name, supplierId: supplier?.id || '', supplierName: supplier?.name || '', quantity, unit: item.unit, total, unitPrice, date, paymentMethod: f.payment.value, lotNumber, lotCode, expiryDate, expiryNotApplicable };
+    item.movements.push({ id: uid(), purchaseId: purchase.id, kind: 'Compra', quantity, total, date, supplierId: supplier?.id || '', supplierName: supplier?.name || '', unitPrice, paymentMethod: f.payment.value, lotNumber, lotCode, expiryDate, expiryNotApplicable });
     data.purchases.unshift(purchase);
     data.expenses.unshift({ id: uid(), name: 'Compra: ' + item.name, total, paymentMethod: f.payment.value, date, category: 'purchase', supplyId: item.id, purchaseId: purchase.id });
-    addNotice('stock', 'Compra registrada: ' + item.name, qtyText(quantity) + ' ' + item.unit + ' por ' + money(total) + (supplier?.name ? ' · ' + supplier.name : '') + '.', item.category === 'supply' ? 'stock-supply' : 'stock-ingredient', '', currentActorId());
+    addNotice('stock', 'Compra registrada: ' + item.name, lotCode + ' · ' + qtyText(quantity) + ' ' + item.unit + ' por ' + money(total) + ' · validade ' + expiryText(purchase) + (supplier?.name ? ' · ' + supplier.name : '') + '.', item.category === 'supply' ? 'stock-supply' : 'stock-ingredient', '', currentActorId());
+    state.purchaseDraft = null;
     save();
-    toast('Compra lançada. O custo médio foi atualizado.');
+    toast('Compra lançada como ' + lotCode + '. O custo médio foi atualizado.');
     navigate('stock:' + (item.category === 'supply' ? 'supply' : 'ingredient'));
   }
   function saveSupplyEdit(form) {
@@ -3753,6 +3884,26 @@
       render({ preserveScroll: true });
       return;
     }
+    if (action === 'shift-schedule-month') {
+      const cursor = calendarCursor();
+      cursor.setMonth(cursor.getMonth() + n(actionNode.dataset.offset));
+      state.scheduleMonth = calendarMonthKey(cursor);
+      state.scheduleDay = state.scheduleMonth + '-01';
+      render({ preserveScroll: true });
+      return;
+    }
+    if (action === 'schedule-today') {
+      state.scheduleMonth = today().slice(0, 7);
+      state.scheduleDay = today();
+      render({ preserveScroll: true });
+      return;
+    }
+    if (action === 'select-schedule-day') {
+      state.scheduleDay = actionNode.dataset.date || today();
+      state.scheduleMonth = state.scheduleDay.slice(0, 7);
+      render({ preserveScroll: true });
+      return;
+    }
     if (action === 'choose-manual-order-kind') {
       rememberOrderDraft();
       const nextKind = actionNode.dataset.kind === 'scheduled' ? 'scheduled' : 'ready';
@@ -3903,6 +4054,11 @@
       render({ preserveScroll: true });
       return;
     }
+    if (target.closest('#purchaseForm') && ['supplyId', 'expiryNotApplicable'].includes(target.name)) {
+      state.purchaseDraft = purchaseDraftFromForm();
+      render({ preserveScroll: true, focusSelector: '[name="' + target.name + '"]' });
+      return;
+    }
     if (target.matches('[data-recipe-supply]')) {
       const line = state.recipeLines[n(target.dataset.recipeSupply)];
       line.supplyId = target.value;
@@ -3944,6 +4100,7 @@
       updateResalePreview();
     }
     if (target.closest('#resaleForm') && ['note'].includes(target.name)) state.resaleDraft = resaleDraftFromForm();
+    if (target.closest('#purchaseForm')) state.purchaseDraft = purchaseDraftFromForm();
     if (target.matches('[data-order-quantity]')) {
       state.orderLines[n(target.dataset.orderQuantity)].quantity = target.value;
       updateOrderPreview();
@@ -4022,7 +4179,7 @@
     const updateButton = $('#appUpdate');
     const showUpdate = () => { if (updateButton) updateButton.hidden = false; };
     updateButton?.addEventListener('click', () => location.reload());
-    navigator.serviceWorker.register('./service-worker.js?v=57').then(registration => {
+    navigator.serviceWorker.register('./service-worker.js?v=58').then(registration => {
       // Solicita a checagem mesmo em quem abre o atalho instalado há semanas.
       registration.update().catch(() => {});
       if (registration.waiting) showUpdate();

@@ -118,3 +118,49 @@ main[class*="screen-settings-"] .form-panel > * { margin-top: 0; }
   font-weight: 800;
   cursor: default;
 }
+
+/* Compras rastreáveis: cada entrada mostra lote e validade sem poluir a tela
+   principal de estoque. */
+.expiry-switch {
+  margin-top: 2px;
+  padding: 11px 12px;
+  border: 1px dashed #e3bbc4;
+  border-radius: 12px;
+  background: #fff8fa;
+  font-size: 13px;
+}
+.expiry-switch input { width: 18px; min-height: 18px; margin: 0 7px 0 0; padding: 0; vertical-align: middle; }
+.lot-note { margin: 0; }
+.lot-history { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.lot-history li { display: grid; gap: 2px; padding: 9px 10px; border-left: 3px solid #d85e78; border-radius: 0 9px 9px 0; background: #fff8fa; }
+.lot-history span { color: var(--muted); font-size: 12px; line-height: 1.35; }
+
+/* Agenda de encomendas: um mês simples, confortável no celular e legível em
+   telas maiores. A data selecionada revela os cartões completos logo abaixo. */
+.schedule-panel { display: grid; gap: 11px; }
+.schedule-toolbar { display: grid; grid-template-columns: 42px minmax(0, 1fr) 42px; align-items: center; gap: 10px; }
+.schedule-toolbar h2 { margin: 0; color: var(--ink); font-size: 18px; text-align: center; text-transform: capitalize; }
+.schedule-toolbar .outline { min-height: 40px; padding: 8px; font-size: 21px; line-height: 1; }
+.schedule-today { justify-self: center; font-size: 12px; }
+.schedule-weekdays,
+.schedule-calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+.schedule-weekdays span { color: var(--muted); font-size: 11px; font-weight: 850; text-align: center; }
+.schedule-calendar { align-items: stretch; }
+.schedule-calendar-empty { min-height: 64px; }
+.schedule-day { display: grid; min-height: 69px; align-content: start; gap: 4px; padding: 8px 5px; border: 1px solid var(--line); border-radius: 11px; background: #fff; color: var(--ink); text-align: left; }
+.schedule-day b { font-size: 14px; }
+.schedule-day span,
+.schedule-day small { color: var(--muted); font-size: 9px; font-weight: 750; line-height: 1.2; }
+.schedule-day.has-orders { border-color: #d98598; background: #fff5f7; }
+.schedule-day.has-orders span { color: var(--pink-dark); }
+.schedule-day.today b::after { content: ' hoje'; color: var(--pink-dark); font-size: 9px; text-transform: uppercase; }
+.schedule-day.selected { border-color: var(--pink-dark); box-shadow: 0 0 0 2px rgba(216,94,120,.16); background: #fdebef; }
+.schedule-day-orders { margin-top: 19px; }
+.schedule-day-orders .section-line { margin-bottom: 10px; }
+.schedule-day-orders h2 { margin: 0; color: var(--ink); font-size: 18px; text-transform: capitalize; }
+.schedule-day-orders p { margin: 3px 0 0; color: var(--muted); font-size: 13px; }
+@media (min-width: 700px) {
+  .schedule-day { min-height: 82px; padding: 10px; }
+  .schedule-day span,
+  .schedule-day small { font-size: 11px; }
+}

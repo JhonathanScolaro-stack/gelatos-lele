@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v57-cloudflare-sync';
+const CACHE = 'gelatos-lele-company-v58-cloudflare-sync';
 const ASSETS = [
   './',
   './index.html',
