@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v60-icon-language';
+const CACHE = 'gelatos-lele-company-v61-complete-modules';
 const ASSETS = [
   './',
   './index.html',
@@ -8,6 +8,7 @@ const ASSETS = [
   './styles-v51.css',
   './styles-v59.css',
   './styles-v60.css',
+  './styles-v61.css',
   './business-core.js',
   './cloud-config.js',
   './cloud-sync.js',

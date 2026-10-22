@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="styles-v51.css?v=59">
   <link rel="stylesheet" href="styles-v59.css?v=59">
   <link rel="stylesheet" href="styles-v60.css?v=60">
+  <link rel="stylesheet" href="styles-v61.css?v=61">
   <title>Gelatos Lele — Gestão</title>
 </head>
 <body>
@@ -22,20 +23,20 @@
     // uma versão antiga instalada do app.
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('./service-worker.js?v=60').then(function (registration) {
+        navigator.serviceWorker.register('./service-worker.js?v=61').then(function (registration) {
           registration.update();
           navigator.serviceWorker.addEventListener('controllerchange', function () {
-            if (sessionStorage.getItem('gelatos-app-reloaded-v60')) return;
-            sessionStorage.setItem('gelatos-app-reloaded-v60', '1');
+            if (sessionStorage.getItem('gelatos-app-reloaded-v61')) return;
+            sessionStorage.setItem('gelatos-app-reloaded-v61', '1');
             window.location.reload();
           }, { once: true });
         }).catch(function () {});
       });
     }
   </script>
-  <script src="business-core.js?v=60"></script>
-  <script src="cloud-config.js?v=60"></script>
-  <script src="cloud-sync.js?v=60"></script>
-  <script src="app-v18.js?v=60"></script>
+  <script src="business-core.js?v=61"></script>
+  <script src="cloud-config.js?v=61"></script>
+  <script src="cloud-sync.js?v=61"></script>
+  <script src="app-v18.js?v=61"></script>
 </body>
 </html>

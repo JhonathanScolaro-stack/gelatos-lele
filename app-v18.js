@@ -766,7 +766,7 @@
   const recipeById = () => byId(data.recipes);
   const headerLogo = () => data.settings.headerLogoUrl || data.settings.headerLogoDataUrl || 'logo-transparente-v2.png';
   const homeLogo = () => data.settings.homeLogoUrl || data.settings.homeLogoDataUrl || headerLogo();
-  const detail = (title, subtitle, value, badge, body) => '<details class="list-card"><summary><div class="list-main"><div><h3>' + esc(title) + '</h3><p>' + subtitle + '</p></div><div><span class="badge ' + esc(badge || '') + '">' + esc(badge || '') + '</span><div class="list-value">' + value + '</div></div></div></summary><div class="details-body">' + body + '</div></details>';
+  const detail = (title, subtitle, value, badge, body) => '<details class="list-card"><summary><div class="list-main"><div><h3>' + esc(title) + '</h3><p>' + subtitle + '</p></div><div class="list-summary-value"><span class="badge ' + esc(badge || '') + '">' + esc(badge || '') + '</span><div class="list-value">' + value + '</div><span class="list-chevron" aria-hidden="true">⌄</span></div></div></summary><div class="details-body">' + body + '</div></details>';
   const options = (items, selected, label = item => item.name) => '<option value="">Selecione</option>' + items.map(item => '<option value="' + esc(item.id) + '"' + (String(item.id) === String(selected) ? ' selected' : '') + '>' + esc(label(item)) + '</option>').join('');
   const field = (label, control, help = '') => '<label class="form-field"><span>' + esc(label) + (help ? info(help) : '') + '</span>' + control + '</label>';
   function info(text, title = 'O que significa?') {
@@ -963,7 +963,7 @@
   }
   function inAppBackButton() {
     const route = backRouteForScreen();
-    return route ? '<button type="button" class="in-app-back" data-action="go-back" data-route="' + esc(route) + '">← Voltar</button>' : '';
+    return route ? '<button type="button" class="in-app-back" data-action="go-back" data-route="' + esc(route) + '">' + appIcon('back') + '<span>Voltar</span></button>' : '';
   }
   function rememberBrowserScreen() {
     if (!window.history?.pushState || applyingBrowserHistory || rememberedBrowserScreen === state.screen) return;
@@ -1005,6 +1005,7 @@
   // biblioteca externa), mantêm a identidade do app e funcionam offline.
   const UI_ICONS = {
     menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+    back: '<path d="M19 12H5M11 18l-6-6 6-6"/>',
     bell: '<path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',
     home: '<path d="m3 11 9-7 9 7v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M9 21v-6h6v6"/>',
     orders: '<path d="M6 3h12l2 4v14H4V7z"/><path d="M8 11h8M8 15h8M8 7h8"/>',
@@ -1592,6 +1593,9 @@
     const lines = (order.items || []).map(line => '<li>' + qtyText(line.quantity) + ' × ' + esc(line.productName) + ' — ' + money(line.total) + '</li>').join('');
     const locked = ['cancelled', 'expired'].includes(order.status);
     let actions = '';
+    // A confirmação pode ser reenviada enquanto a venda estiver ativa. Isso
+    // ajuda a revendedora a conferir o lote e o total antes mesmo do pagamento.
+    if (!locked) actions += '<button class="secondary resale-confirmation" data-action="send-resale-confirmation" data-id="' + esc(order.id) + '">' + appIcon('message') + '<span>Enviar confirmação</span></button>';
     if (order.status === 'confirmed') actions += '<button class="primary" data-action="mark-paid" data-id="' + esc(order.id) + '">Marcar como recebido</button>';
     if (!locked) actions += '<button class="outline" data-action="cancel-order" data-id="' + esc(order.id) + '">Cancelar e devolver estoque</button>';
     actions += '<button class="outline danger-button" data-action="delete-order" data-id="' + esc(order.id) + '">Arquivar</button>';
@@ -1620,7 +1624,7 @@
     }
     if (state.screen === 'resale-history') {
       const cards = resaleOrders().slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(resaleOrderCard).join('') || empty('Nenhuma venda para revenda registrada ainda.');
-      return '<section class="screen active">' + heading('Revendas', 'Vendas para revenda', 'Cada venda mostra o estoque separado, o valor a receber e o lucro real quando marcada como paga.') + '<div class="isolated-actions"><button class="primary" data-route="resale:new">Nova venda para revenda</button></div><div class="list">' + cards + '</div></section>';
+      return '<section class="screen active">' + heading('Revendas', 'Vendas para revenda', 'Abra uma venda para conferir o lote, enviar a confirmação com valores e acompanhar o recebimento.') + '<div class="isolated-actions"><button class="primary" data-route="resale:new">Nova venda para revenda</button></div><div class="list">' + cards + '</div></section>';
     }
     if (state.screen === 'resale-new') {
       const draft = { resellerId: '', payment: 'Pix', date: today(), dueDate: today(), paidNow: false, note: '', ...(state.resaleDraft || {}) };
@@ -3569,6 +3573,17 @@
     toast('Categoria excluída.');
     navigate('records:categories');
   }
+  function shareConfirmation(title, text, phone) {
+    // No celular, a folha nativa permite escolher WhatsApp pessoal, Business
+    // ou outro app. No computador, mantemos o link convencional como reserva.
+    if (navigator.share) {
+      navigator.share({ title, text }).catch(() => {});
+      return;
+    }
+    const digits = String(phone || '').replace(/\D/g, '');
+    const number = digits ? (digits.startsWith('55') ? digits : '55' + digits) : '';
+    window.open('https://wa.me/' + number + '?text=' + encodeURIComponent(text), '_blank', 'noopener');
+  }
   function sendOrder(id) {
     const order = data.orders.find(item => String(item.id) === String(id));
     if (!order) return;
@@ -3581,13 +3596,18 @@
       .replace(/\{total\}/g, money(order.total))
       .replace(/\{pix\}/g, data.settings.pixKey || 'A combinar')
       .replace(/\{data_entrega\}/g, brDate(order.scheduledFor || order.dueDate || order.date));
-    if (navigator.share) {
-      navigator.share({ title: 'Pedido Gelatos Lele', text }).catch(() => {});
-      return;
-    }
-    const phone = String(order.phone || '').replace(/\D/g, '');
-    const number = phone ? (phone.startsWith('55') ? phone : '55' + phone) : '';
-    window.open('https://wa.me/' + number + '?text=' + encodeURIComponent(text), '_blank', 'noopener');
+    shareConfirmation('Pedido Gelatos Lele', text, order.phone);
+  }
+  function sendResaleConfirmation(id) {
+    const order = resaleOrders().find(item => String(item.id) === String(id));
+    if (!order || ['cancelled', 'expired'].includes(order.status)) return;
+    const reseller = resellerById()[order.resellerId];
+    const recipient = reseller?.name || order.customer || 'revendedora';
+    const lines = (order.items || []).map(line => round(line.quantity) + ' × ' + line.productName + ' — ' + money(line.total)).join('\n');
+    const payment = order.status === 'paid' ? 'Pagamento: recebido' : 'Forma de pagamento: ' + (order.paymentMethod || 'a combinar');
+    const due = order.dueDate ? '\nPrazo combinado: ' + brDate(order.dueDate) : '';
+    const text = 'Olá, ' + recipient + '!\n\nSegue a confirmação da sua compra para revenda na Gelatos Lele.\n\n' + lines + '\n\nValor total: ' + money(order.total) + '\n' + payment + due;
+    shareConfirmation('Confirmação de revenda Gelatos Lele', text, order.phone || reseller?.phone);
   }
   function backup() {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -3971,6 +3991,7 @@
     if (action === 'cancel-order') { cancelOrder(id); return; }
     if (action === 'delete-order') { deleteOrder(id); return; }
     if (action === 'send-order') { sendOrder(id); return; }
+    if (action === 'send-resale-confirmation') { sendResaleConfirmation(id); return; }
     if (action === 'edit-supply') { state.editSupply = id; state.screen = 'supply-edit'; render(); return; }
     if (action === 'delete-supply') { deleteSupply(id); return; }
     if (action === 'restore-supply') { restoreSupply(id); return; }
