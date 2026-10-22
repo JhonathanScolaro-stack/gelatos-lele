@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v58-cloudflare-sync';
+const CACHE = 'gelatos-lele-company-v59-visual-refresh';
 const ASSETS = [
   './',
   './index.html',
@@ -6,6 +6,7 @@ const ASSETS = [
   './styles-v18.css',
   './styles-v32.css',
   './styles-v51.css',
+  './styles-v59.css',
   './business-core.js',
   './cloud-config.js',
   './cloud-sync.js',
@@ -21,6 +22,7 @@ const ASSETS = [
   './customer-v36.css',
   './customer-v51.css',
   './customer-v53.css',
+  './customer-v59.css',
   './customer.js'
 ];
 self.addEventListener('install', event => {

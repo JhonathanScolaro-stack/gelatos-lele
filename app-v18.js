@@ -1001,31 +1001,63 @@
     }
     return filter;
   }
-  function navGroup(label, group, children) {
+  // Ícones próprios do sistema. São vetores leves (não dependem de uma
+  // biblioteca externa), mantêm a identidade do app e funcionam offline.
+  const UI_ICONS = {
+    menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+    bell: '<path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',
+    home: '<path d="m3 11 9-7 9 7v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M9 21v-6h6v6"/>',
+    orders: '<path d="M6 3h12l2 4v14H4V7z"/><path d="M8 11h8M8 15h8M8 7h8"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18M8 14h3M13 14h3M8 17h3"/>',
+    stock: '<path d="m4 8 8-4 8 4-8 4zM4 8v8l8 4 8-4V8M12 12v8"/>',
+    production: '<path d="M7 3v5l-3 5a5 5 0 0 0 4 8h8a5 5 0 0 0 4-8l-3-5V3"/><path d="M7 8h10M9 16h6"/>',
+    resale: '<path d="M4 7h16v14H4z"/><path d="M7 7V4h10v3M8 12h8M10 12v3h4v-3"/>',
+    finance: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h3"/>',
+    report: '<path d="M5 3h10l4 4v14H5z"/><path d="M14 3v5h5M8 17v-3M12 17v-6M16 17v-8"/>',
+    records: '<path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+    cart: '<path d="M3 4h2l2 11h10l2-8H6"/><circle cx="9" cy="20" r="1"/><circle cx="17" cy="20" r="1"/>',
+    tag: '<path d="M3 12V5a2 2 0 0 1 2-2h7l9 9-9 9z"/><circle cx="8" cy="8" r="1"/>',
+    people: '<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0M16 5a3 3 0 0 1 0 6M18 20a5 5 0 0 0-3-4.6"/>',
+    recipe: '<path d="M8 3v5l-4 7a4 4 0 0 0 3.5 6h9A4 4 0 0 0 20 15l-4-7V3"/><path d="M8 8h8M9 16h6"/>',
+    tools: '<path d="m14 5 5 5-9 9-5 1 1-5zM13 6l5 5M5 4l3 3M4 11h4"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.05 2.05-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56v.09h-2.9v-.09a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06L6.9 16.94l.06-.06A1.7 1.7 0 0 0 7.3 15a1.7 1.7 0 0 0-1.56-1.03h-.09v-2.9h.09A1.7 1.7 0 0 0 7.3 10a1.7 1.7 0 0 0-.34-1.88L6.9 8.06 8.95 6l.06.06a1.7 1.7 0 0 0 1.88.34 1.7 1.7 0 0 0 1.03-1.56v-.09h2.9v.09A1.7 1.7 0 0 0 15.85 6.4a1.7 1.7 0 0 0 1.88-.34L17.8 6l2.05 2.06-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.03h.09v2.9h-.09A1.7 1.7 0 0 0 19.4 15Z"/>',
+    cloud: '<path d="M7 18h10a4 4 0 0 0 .6-7.96A6 6 0 0 0 6.1 8.5 4.8 4.8 0 0 0 7 18Z"/><path d="M12 11v7M9.5 14.5 12 12l2.5 2.5"/>',
+    image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m4 18 5-5 3 3 2-2 6 4"/>',
+    message: '<path d="M4 5h16v12H9l-5 4z"/><path d="M8 10h8M8 13h5"/>',
+    delivery: '<path d="M3 6h11v10H3zM14 10h3l3 3v3h-6z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
+    backup: '<path d="M20 12a8 8 0 1 1-2.35-5.65L20 8"/><path d="M20 3v5h-5M12 8v8M9 13l3 3 3-3"/>',
+    price: '<path d="M4 19V5h11l5 5v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 9h6M8 13h7M8 17h4"/>',
+    capacity: '<path d="M4 20V9l8-5 8 5v11"/><path d="M8 20v-6h8v6M10 9h4"/>'
+  };
+  function appIcon(name, className = '') {
+    return '<svg class="app-icon ' + esc(className) + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + (UI_ICONS[name] || UI_ICONS.records) + '</svg>';
+  }
+  function navGroup(label, group, children, icon = 'records') {
     const open = state.menu === group;
-    return '<section class="nav-group ' + (open ? 'open' : '') + '"><button class="nav-heading" data-menu="' + group + '">' + esc(label) + '<span>⌄</span></button><div class="nav-children">' + children.map(child => '<button data-route="' + child[1] + '">' + esc(child[0]) + '</button>').join('') + '</div></section>';
+    return '<section class="nav-group ' + (open ? 'open' : '') + '"><button class="nav-heading" data-menu="' + group + '"><span class="nav-heading-label">' + appIcon(icon) + '<b>' + esc(label) + '</b></span><span class="nav-chevron">⌄</span></button><div class="nav-children">' + children.map(child => '<button data-route="' + child[1] + '">' + appIcon(child[2] || icon, 'nav-child-icon') + '<span>' + esc(child[0]) + '</span></button>').join('') + '</div></section>';
   }
   function shell() {
     if (cloudInitialLoad) return '<div class="boot cloud-boot"><strong>Conectando sua empresa…</strong><span>Estamos conferindo a cópia mais recente antes de liberar alterações.</span></div><div id="toast" role="status" aria-live="polite"></div>';
     const needsAuth = state.screen === 'settings-cloud' && (!window.GelatosCloud?.hasSession() || window.GelatosCloud?.isPasswordRecovery?.());
     if (needsAuth) return '<div class="auth-shell">' + settingsScreen() + '</div><div id="toast" role="status" aria-live="polite"></div>';
     const unread = visibleNotifications().filter(item => !item.read).length;
-    return '<div class="app-shell"><header class="topbar"><button class="icon-button" data-action="open-menu" aria-label="Abrir menu">☰</button><img class="brand" src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="bell-button" data-action="open-notices" aria-label="Notificações">🔔' + (unread ? '<b>' + unread + '</b>' : '') + '</button><button id="installCta" class="install-cta" hidden>Instalar</button></header><div class="drawer-shade" data-action="close-menu"></div><aside class="drawer"><div class="drawer-brand"><img src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="icon-button" data-action="close-menu" aria-label="Fechar menu">×</button></div><nav><button class="nav-home" data-route="home">Tela inicial</button>' +
-      navGroup('Controle de pedidos', 'orders', [['Novo pedido', 'orders:new'], ['Pedidos realizados', 'orders:history'], ['Programação de encomendas', 'orders:calendar']]) +
-      navGroup('Controle de estoque', 'stock', [['Estoque produzido', 'stock:ready'], ['Estoque de insumos', 'stock:supply'], ['Estoque de ingredientes', 'stock:ingredient'], ['Produções', 'production']]) +
-      navGroup('Revendas', 'resale', [['Visão das revendas', 'resale:dashboard'], ['Nova venda para revenda', 'resale:new'], ['Vendas para revenda', 'resale:history'], ['Cadastro de revendedores', 'resale:people']]) +
-      navGroup('Financeiro', 'finance', [['Visão financeira', 'finance:overview'], ['Contas a receber', 'finance:receivable'], ['Contas pagas', 'finance:payable'], ['Fechamento inicial', 'finance:opening']]) +
-      navGroup('Relatórios', 'reports', [['Pedidos', 'reports:orders'], ['Financeiro', 'reports:finance'], ['Estoque', 'reports:stock']]) +
-      navGroup('Cadastros', 'records', [['Cadastrar compra', 'stock:purchase'], ['Cardápio / sabores', 'records:catalog'], ['Categorias de geladinhos', 'records:categories'], ['Ingredientes', 'stock:ingredient'], ['Insumos', 'stock:supply'], ['Fornecedores', 'records:suppliers'], ['Nova receita', 'recipes']]) +
-      navGroup('Ferramentas', 'tools', [['Preços e compras', 'tools:compare'], ['Produção possível', 'tools:capacity']]) +
-      navGroup('Configurações', 'settings', [['Visão geral', 'settings:home'], ['Nuvem e sincronização', 'settings:cloud'], ['Logo do app', 'settings:appearance'], ['Mensagem e Pix', 'settings:message'], ['Cardápio do cliente', 'settings:catalog'], ['Frete e entrega', 'settings:delivery'], ['Backup', 'settings:backup']]) +
+    return '<div class="app-shell"><header class="topbar"><button class="icon-button" data-action="open-menu" aria-label="Abrir menu">' + appIcon('menu') + '</button><img class="brand" src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="bell-button" data-action="open-notices" aria-label="Notificações">' + appIcon('bell') + (unread ? '<b>' + unread + '</b>' : '') + '</button><button id="installCta" class="install-cta" hidden>Instalar</button></header><div class="drawer-shade" data-action="close-menu"></div><aside class="drawer"><div class="drawer-brand"><img src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="icon-button" data-action="close-menu" aria-label="Fechar menu">×</button></div><nav><button class="nav-home" data-route="home">' + appIcon('home') + '<span>Tela inicial</span></button>' +
+      navGroup('Controle de pedidos', 'orders', [['Novo pedido', 'orders:new', 'plus'], ['Pedidos realizados', 'orders:history', 'orders'], ['Programação de encomendas', 'orders:calendar', 'calendar']], 'orders') +
+      navGroup('Controle de estoque', 'stock', [['Estoque produzido', 'stock:ready', 'stock'], ['Estoque de insumos', 'stock:supply', 'stock'], ['Estoque de ingredientes', 'stock:ingredient', 'recipe'], ['Produções', 'production', 'production']], 'stock') +
+      navGroup('Revendas', 'resale', [['Visão das revendas', 'resale:dashboard', 'resale'], ['Nova venda para revenda', 'resale:new', 'plus'], ['Vendas para revenda', 'resale:history', 'orders'], ['Cadastro de revendedores', 'resale:people', 'people']], 'resale') +
+      navGroup('Financeiro', 'finance', [['Visão financeira', 'finance:overview', 'finance'], ['Contas a receber', 'finance:receivable', 'price'], ['Contas pagas', 'finance:payable', 'finance'], ['Fechamento inicial', 'finance:opening', 'report']], 'finance') +
+      navGroup('Relatórios', 'reports', [['Pedidos', 'reports:orders', 'orders'], ['Financeiro', 'reports:finance', 'finance'], ['Estoque', 'reports:stock', 'stock']], 'report') +
+      navGroup('Cadastros', 'records', [['Cadastrar compra', 'stock:purchase', 'cart'], ['Cardápio / sabores', 'records:catalog', 'tag'], ['Categorias de geladinhos', 'records:categories', 'records'], ['Ingredientes', 'stock:ingredient', 'recipe'], ['Insumos', 'stock:supply', 'stock'], ['Fornecedores', 'records:suppliers', 'people'], ['Nova receita', 'recipes', 'recipe']], 'records') +
+      navGroup('Ferramentas', 'tools', [['Preços e compras', 'tools:compare', 'price'], ['Produção possível', 'tools:capacity', 'capacity']], 'tools') +
+      navGroup('Configurações', 'settings', [['Visão geral', 'settings:home', 'settings'], ['Nuvem e sincronização', 'settings:cloud', 'cloud'], ['Logo do app', 'settings:appearance', 'image'], ['Mensagem e Pix', 'settings:message', 'message'], ['Cardápio do cliente', 'settings:catalog', 'cart'], ['Frete e entrega', 'settings:delivery', 'delivery'], ['Backup', 'settings:backup', 'backup']], 'settings') +
       '</nav></aside><main class="screen-' + esc(state.screen) + '">' + inAppBackButton() + screen() + '</main>' + noticesPanel() + infoPanel() + '</div><div id="toast" role="status" aria-live="polite"></div>';
   }
   function heading(kicker, title, description) {
     return '<div class="screen-heading"><p>' + esc(kicker) + '</p><h1>' + esc(title) + '</h1><span>' + esc(description) + '</span></div>';
   }
-  function metric(label, id, text, route, featured = false) {
-    return '<button class="metric ' + (featured ? 'featured' : '') + '" data-route="' + route + '"><small>' + esc(label) + '</small><strong id="' + id + '">—</strong><span>' + esc(text) + '</span><em>Ver detalhes</em></button>';
+  function metric(label, id, text, route, featured = false, icon = 'report') {
+    return '<button class="metric ' + (featured ? 'featured' : '') + '" data-route="' + route + '"><span class="metric-icon">' + appIcon(icon) + '</span><small>' + esc(label) + '</small><strong id="' + id + '">—</strong><span>' + esc(text) + '</span><em>Ver detalhes <span aria-hidden="true">→</span></em></button>';
   }
   function bestSellers(filter) {
     const counts = {};
@@ -1042,17 +1074,17 @@
     const weekStart = monday.toISOString().slice(0, 10);
     const currentMonth = date => new Date(date + 'T12:00:00').getMonth() === now.getMonth() && new Date(date + 'T12:00:00').getFullYear() === now.getFullYear();
     return '<section class="screen active"><div class="welcome"><img src="' + esc(homeLogo()) + '" alt="Gelatos Lele"><span>Visão geral da empresa</span></div><div class="dashboard-grid">' +
-      metric('Geladinhos prontos', 'dashReady', 'Estoque disponível', 'stock:ready', true) +
-      metric('Pedidos de hoje', 'dashOrders', 'Pedidos criados hoje', 'orders:history') +
-      metric('Recebido hoje', 'dashToday', 'Somente pedidos pagos', 'reports:finance:today') +
-      metric('Faturamento do mês', 'dashMonth', 'Pedidos pagos no mês', 'reports:finance:month') +
-      metric('Faturamento do ano', 'dashYear', 'Pedidos pagos no ano', 'reports:finance:year') +
-      metric('Lucro real do mês', 'dashProfit', 'Vendas − custos − taxas − despesas', 'reports:finance:month') +
+      metric('Geladinhos prontos', 'dashReady', 'Estoque disponível', 'stock:ready', true, 'stock') +
+      metric('Pedidos de hoje', 'dashOrders', 'Pedidos criados hoje', 'orders:history', false, 'orders') +
+      metric('Recebido hoje', 'dashToday', 'Somente pedidos pagos', 'reports:finance:today', false, 'finance') +
+      metric('Faturamento do mês', 'dashMonth', 'Pedidos pagos no mês', 'reports:finance:month', false, 'report') +
+      metric('Faturamento do ano', 'dashYear', 'Pedidos pagos no ano', 'reports:finance:year', false, 'price') +
+      metric('Lucro real do mês', 'dashProfit', 'Vendas − custos − taxas − despesas', 'reports:finance:month', false, 'finance') +
       '</div><section class="panel balance-panel"><h2>Caixa e conta</h2><div class="payment-balances"><span>Dinheiro <b id="dashCash">—</b></span><span>Pix / conta <b id="dashPix">—</b></span><span>Crédito <b id="dashCredit">—</b></span><span>Débito <b id="dashDebit">—</b></span></div></section><h2 class="section-title">Sabores mais vendidos</h2><div class="best-grid">' +
       bestCard('Na semana', bestSellers(order => day(order.paidAt || order.date) >= weekStart), 'reports:orders:week') +
       bestCard('No mês', bestSellers(order => currentMonth(day(order.paidAt || order.date))), 'reports:orders:month') +
       bestCard('No geral', bestSellers(() => true), 'reports:orders:all') +
-      '</div><h2 class="section-title">Atalhos</h2><div class="shortcuts"><button data-route="orders:new"><b>Novo pedido</b><span>Venda e confirmação</span></button><button data-route="stock:purchase"><b>Registrar compra</b><span>Itens e fornecedor</span></button><button data-route="production"><b>Produzir lote</b><span>Baixa automática</span></button><button data-route="recipes"><b>Nova receita</b><span>Custo por item</span></button></div></section>';
+      '</div><h2 class="section-title">Atalhos</h2><div class="shortcuts"><button data-route="orders:new">' + appIcon('plus') + '<b>Novo pedido</b><span>Venda e confirmação</span></button><button data-route="stock:purchase">' + appIcon('cart') + '<b>Registrar compra</b><span>Itens e fornecedor</span></button><button data-route="production">' + appIcon('production') + '<b>Produzir lote</b><span>Baixa automática</span></button><button data-route="recipes">' + appIcon('recipe') + '<b>Nova receita</b><span>Custo por item</span></button></div></section>';
   }
   function screen() {
     if (state.screen === 'home') return homeScreen();
@@ -2306,7 +2338,7 @@
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=58';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=59';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -2315,7 +2347,7 @@
   }
   function managementCatalogLink() {
     const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    return base + 'customer.html?v=58&gestao=1';
+    return base + 'customer.html?v=59&gestao=1';
   }
   function noticesPanel() {
     if (!state.notices) return '';
@@ -4179,7 +4211,7 @@
     const updateButton = $('#appUpdate');
     const showUpdate = () => { if (updateButton) updateButton.hidden = false; };
     updateButton?.addEventListener('click', () => location.reload());
-    navigator.serviceWorker.register('./service-worker.js?v=58').then(registration => {
+    navigator.serviceWorker.register('./service-worker.js?v=59').then(registration => {
       // Solicita a checagem mesmo em quem abre o atalho instalado há semanas.
       registration.update().catch(() => {});
       if (registration.waiting) showUpdate();
