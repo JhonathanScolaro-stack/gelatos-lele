@@ -1,0 +1,79 @@
+/* v60 — camada final de acabamento: ícones em duotone e uma paleta curta
+   para o aplicativo parecer uma única marca, não uma coleção de cartões. */
+:root {
+  --cocoa: #482830;
+  --cocoa-soft: #6d3b47;
+  --rose: #d45c77;
+  --rose-deep: #a93f58;
+  --rose-pale: #fff0f3;
+  --cream: #fffaf8;
+}
+
+body { background: radial-gradient(740px 290px at 50% -120px, rgba(242, 176, 190, .31), transparent 68%), linear-gradient(180deg, #fff8f7 0, #fffdfc 54%, #fff8f7 100%); }
+.brand { filter: drop-shadow(0 2px 0 rgba(255,255,255,.85)); }
+.topbar { border-bottom: 1px solid rgba(224, 188, 197, .74); }
+
+/* Ícones: mesma família visual em todo o painel. O fundo leve guia o olhar,
+   enquanto o traço em cacau não concorre com o rosa da marca. */
+.app-icon { stroke-width: 2.05; }
+.icon-menu,.icon-bell { color: var(--cocoa); }
+.metric-icon {
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(217, 147, 164, .22);
+  background: linear-gradient(145deg, #fff, #fdecef);
+  color: var(--rose-deep);
+  box-shadow: 0 5px 11px rgba(127, 49, 68, .08);
+}
+.metric-icon .app-icon { width: 20px; height: 20px; }
+.metric.featured .metric-icon { border-color: rgba(255,255,255,.20); background: rgba(255,255,255,.17); }
+.shortcuts button .app-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  padding: 8px;
+  border: 1px solid rgba(211, 93, 119, .17);
+  border-radius: 12px;
+  background: #fff1f4;
+  color: var(--rose-deep);
+}
+.shortcuts button:nth-child(2) .app-icon { background: #fff7ef; color: #9b5942; }
+.shortcuts button:nth-child(3) .app-icon { background: #fff0f3; color: #a63f59; }
+.shortcuts button:nth-child(4) .app-icon { background: #fff5f6; color: #7e4655; }
+
+.drawer .nav-home .app-icon,
+.drawer .nav-heading-label .app-icon {
+  display: grid;
+  width: 31px;
+  height: 31px;
+  padding: 6px;
+  border-radius: 10px;
+  background: #fff0f3;
+  color: var(--rose-deep);
+}
+.drawer .nav-group:nth-of-type(2) .nav-heading-label .app-icon { background: #fff6ed; color: #a95c41; }
+.drawer .nav-group:nth-of-type(3) .nav-heading-label .app-icon { background: #fff4f6; color: #a64860; }
+.drawer .nav-group:nth-of-type(4) .nav-heading-label .app-icon { background: #fff7ef; color: #874e3e; }
+.drawer .nav-group:nth-of-type(5) .nav-heading-label .app-icon { background: #fff0f3; color: #a54a5f; }
+.drawer .nav-group:nth-of-type(6) .nav-heading-label .app-icon { background: #fff1e9; color: #9c5c43; }
+.drawer .nav-group:nth-of-type(7) .nav-heading-label .app-icon { background: #fff4f6; color: #9d4b60; }
+.drawer .nav-group:nth-of-type(8) .nav-heading-label .app-icon { background: #fff6f6; color: #814652; }
+.nav-children button { border-radius: 10px; }
+.nav-children button:hover { color: var(--cocoa); }
+.nav-child-icon { color: #b2536a; }
+
+/* Reforça ações sem multiplicar cores pelo restante do sistema. */
+.screen-heading p,.eyebrow { color: var(--rose-deep); }
+.primary { background: linear-gradient(135deg, #df6c86, #c64c68 70%, #b8425d); }
+.primary:focus-visible,.outline:focus-visible,.metric:focus-visible,.shortcuts button:focus-visible { outline: 3px solid rgba(212, 92, 119, .28); outline-offset: 3px; }
+.panel,.list-card,.best-card,.metric { border-color: rgba(224, 198, 204, .94); }
+.best-card small { display: inline-flex; align-items: center; gap: 6px; }
+.best-card small::before { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--rose); content: ''; }
+.balance-panel { border-left-color: var(--rose); }
+.payment-balances span { min-height: 58px; border-color: #f0dce0; }
+.badge { border: 0; box-shadow: inset 0 0 0 1px rgba(183, 67, 93, .12); }
+
+@media (max-width: 390px) {
+  .drawer .nav-home .app-icon,.drawer .nav-heading-label .app-icon { width: 29px; height: 29px; padding: 6px; }
+  .metric-icon { width: 34px; height: 34px; }
+}

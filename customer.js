@@ -28,7 +28,7 @@
     const type = productType(value);
     return type === 'Água' ? 'agua' : type === 'Leite' ? 'leite' : 'gourmet';
   };
-  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=59';
+  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=60';
   const openedFromManagement = () => new URLSearchParams(location.search).get('gestao') === '1';
   const ORDER_ATTEMPT_KEY = 'gelatos-lele-customer-order-attempt-v1';
   const CUSTOMER_CLIENT_KEY = 'gelatos-lele-customer-client-v1';
@@ -303,10 +303,20 @@
       (opened ? '<section class="product-picker"><b>' + (soldOut ? 'Este sabor está esgotado.' : 'Quantos você quer?') + '</b>' + (soldOut ? '<span>Acompanhe o cardápio; ele volta a ficar disponível assim que houver produção.</span>' : '<div class="quantity"><button type="button" data-change="' + esc(product.id) + ':-1" aria-label="Diminuir ' + esc(product.name) + '"' + (chosen ? '' : ' disabled') + '>−</button><strong>' + chosen + '</strong><button type="button" data-change="' + esc(product.id) + ':1" aria-label="Aumentar ' + esc(product.name) + '"' + (chosen >= maximum ? ' disabled' : '') + '>+</button><small>' + (scheduled ? 'A Gelatos Lele confirmará a disponibilidade para a data escolhida.' : 'Máximo disponível: ' + available) + '</small></div>') + '<button type="button" class="picker-back" data-action="close-product">← Voltar aos sabores</button></section>' : '') +
       '</article>';
   }
+  // Pequenos pictogramas próprios para o agrupamento do cardápio. Eles não
+  // dependem de imagens externas e continuam claros quando novas categorias
+  // forem criadas pela empresa.
+  function categoryGlyph(category) {
+    const id = categorySlug(category?.id || category?.name);
+    if (/agua|água/.test(id)) return '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3s-5.5 6.2-5.5 10.2a5.5 5.5 0 0 0 11 0C17.5 9.2 12 3 12 3Z"/><path d="M9.5 15.2c.55.85 1.35 1.3 2.5 1.3"/></svg>';
+    if (/leite|milk/.test(id)) return '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6v3l2 3v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V9l2-3z"/><path d="M8 11h8M10 6h4"/></svg>';
+    if (/gourmet|premium|especial/.test(id)) return '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.35 4.65L18 9l-4.65 1.35L12 15l-1.35-4.65L6 9l4.65-1.35z"/><path d="m18.5 15 .65 2.35 2.35.65-2.35.65-.65 2.35-.65-2.35-2.35-.65 2.35-.65z"/></svg>';
+    return '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12V5a2 2 0 0 1 2-2h7l8 9-8 9H6a2 2 0 0 1-2-2z"/><circle cx="9" cy="8" r="1"/></svg>';
+  }
   function categoryCard(group) {
     const opened = String(openCategoryId) === String(group.category.id);
     const count = group.products.length;
-    return '<section class="catalog-type ' + (opened ? 'is-open' : '') + '"><button type="button" class="catalog-type-heading catalog-category-toggle" data-action="toggle-category" data-category="' + esc(group.category.id) + '" aria-expanded="' + opened + '"><span><b>' + esc(group.category.name) + '</b><small>' + count + (count === 1 ? ' sabor disponível no cardápio' : ' sabores disponíveis no cardápio') + '</small></span><span class="catalog-category-action">' + (opened ? 'Fechar' : 'Ver sabores') + ' <i aria-hidden="true">⌄</i></span></button><div class="product-list"' + (opened ? '' : ' hidden') + '>' + group.products.map(productCard).join('') + '</div></section>';
+    return '<section class="catalog-type category-card-' + esc(categorySlug(group.category.id || group.category.name)) + ' ' + (opened ? 'is-open' : '') + '"><button type="button" class="catalog-type-heading catalog-category-toggle" data-action="toggle-category" data-category="' + esc(group.category.id) + '" aria-expanded="' + opened + '"><span class="catalog-category-icon">' + categoryGlyph(group.category) + '</span><span class="catalog-category-copy"><b>' + esc(group.category.name) + '</b><small>' + count + (count === 1 ? ' sabor disponível no cardápio' : ' sabores disponíveis no cardápio') + '</small></span><span class="catalog-category-action">' + (opened ? 'Fechar' : 'Ver sabores') + ' <i aria-hidden="true">⌄</i></span></button><div class="product-list"' + (opened ? '' : ' hidden') + '>' + group.products.map(productCard).join('') + '</div></section>';
   }
   function fulfillmentChooser() {
     const ready = !isScheduled();

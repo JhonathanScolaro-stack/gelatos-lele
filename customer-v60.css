@@ -1,0 +1,42 @@
+/* v60 — o cardápio ganha pictogramas próprios por categoria e conserva o
+   mesmo conjunto de cores da marca para não competir com a logo. */
+:root { --cocoa:#482830; --rose:#d45c77; --rose-deep:#a93f58; }
+.hero { background: radial-gradient(180px 160px at 104% -18%, rgba(255,255,255,.25), transparent 69%), radial-gradient(180px 140px at -8% 112%, rgba(255,214,220,.22), transparent 73%), linear-gradient(135deg, #512b35 0, #934057 52%, #d3637c 100%); }
+.catalog-category-toggle { display: grid; grid-template-columns: 42px minmax(0,1fr) auto; align-items: center; gap: 12px; }
+.catalog-category-toggle::before { content: none; }
+.catalog-category-toggle>span.catalog-category-icon:first-child {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
+  padding-left: 0;
+  gap: 0;
+  place-items: center;
+  border: 1px solid rgba(192, 83, 108, .15);
+  border-radius: 14px;
+  background: #fff0f3;
+  color: var(--rose-deep);
+}
+.catalog-category-icon svg { width: 22px; height: 22px; }
+.catalog-category-copy { display: grid; min-width: 0; gap: 3px; }
+.catalog-category-copy b { color: var(--cocoa); font-size: 18px; letter-spacing: -.01em; }
+.catalog-category-copy small { color: var(--muted); font-size: 12px; font-weight: 650; }
+.category-card-agua .catalog-category-icon { background: #fff0f3; color: #8c4a60; border-color: rgba(140,74,96,.14); }
+.category-card-leite .catalog-category-icon { background: #fff4e7; color: #956a2d; border-color: rgba(149,106,45,.15); }
+.category-card-gourmet .catalog-category-icon { background: #f8e8f0; color: #ad4662; border-color: rgba(173,70,98,.16); }
+.catalog-type.is-open .catalog-category-toggle { background: linear-gradient(135deg, #fff4f6, #fffdfc); }
+.catalog-type.is-open .catalog-category-icon { border-color: rgba(169,63,88,.30); box-shadow: 0 5px 12px rgba(151,56,80,.12); }
+.catalog-category-action { white-space: nowrap; }
+.product-title em { background: #fde8ee; color: var(--rose-deep); }
+.product-type { border: 0; box-shadow: inset 0 0 0 1px rgba(170,67,92,.12); }
+.price { color: var(--rose-deep); }
+.primary { background: linear-gradient(135deg, #df6c86, #c64c68 70%, #b8425d); }
+.product-open:focus-visible,.catalog-category-toggle:focus-visible,.primary:focus-visible { outline: 3px solid rgba(212,92,119,.28); outline-offset: 3px; }
+
+@media (max-width: 420px) {
+  .catalog-category-toggle { grid-template-columns: 38px minmax(0,1fr) auto; gap: 9px; }
+  .catalog-category-toggle>span.catalog-category-icon:first-child { width: 38px; min-width: 38px; height: 38px; border-radius: 12px; }
+  .catalog-category-icon svg { width: 20px; height: 20px; }
+  .catalog-category-copy b { font-size: 16px; }
+  .catalog-category-action { padding: 6px 7px; }
+}

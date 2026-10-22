@@ -1031,7 +1031,7 @@
     capacity: '<path d="M4 20V9l8-5 8 5v11"/><path d="M8 20v-6h8v6M10 9h4"/>'
   };
   function appIcon(name, className = '') {
-    return '<svg class="app-icon ' + esc(className) + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + (UI_ICONS[name] || UI_ICONS.records) + '</svg>';
+    return '<svg class="app-icon icon-' + esc(name) + ' ' + esc(className) + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' + (UI_ICONS[name] || UI_ICONS.records) + '</svg>';
   }
   function navGroup(label, group, children, icon = 'records') {
     const open = state.menu === group;
@@ -2338,7 +2338,7 @@
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=59';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=60';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -2347,7 +2347,7 @@
   }
   function managementCatalogLink() {
     const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    return base + 'customer.html?v=59&gestao=1';
+    return base + 'customer.html?v=60&gestao=1';
   }
   function noticesPanel() {
     if (!state.notices) return '';
@@ -4211,7 +4211,7 @@
     const updateButton = $('#appUpdate');
     const showUpdate = () => { if (updateButton) updateButton.hidden = false; };
     updateButton?.addEventListener('click', () => location.reload());
-    navigator.serviceWorker.register('./service-worker.js?v=59').then(registration => {
+    navigator.serviceWorker.register('./service-worker.js?v=60').then(registration => {
       // Solicita a checagem mesmo em quem abre o atalho instalado há semanas.
       registration.update().catch(() => {});
       if (registration.waiting) showUpdate();

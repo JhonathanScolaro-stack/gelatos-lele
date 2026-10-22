@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="customer-v51.css?v=59">
   <link rel="stylesheet" href="customer-v53.css?v=59">
   <link rel="stylesheet" href="customer-v59.css?v=59">
+  <link rel="stylesheet" href="customer-v60.css?v=60">
   <title>Cardápio Gelatos Lele</title>
 </head>
 <body>
@@ -22,11 +23,11 @@
     // permaneçam presos aos arquivos de uma versão anterior do cardápio.
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('./service-worker.js?v=59').then(function (registration) {
+        navigator.serviceWorker.register('./service-worker.js?v=60').then(function (registration) {
           registration.update();
           navigator.serviceWorker.addEventListener('controllerchange', function () {
-            if (sessionStorage.getItem('gelatos-catalog-reloaded-v59')) return;
-            sessionStorage.setItem('gelatos-catalog-reloaded-v59', '1');
+            if (sessionStorage.getItem('gelatos-catalog-reloaded-v60')) return;
+            sessionStorage.setItem('gelatos-catalog-reloaded-v60', '1');
             window.location.reload();
           }, { once: true });
         }).catch(function () {
@@ -35,8 +36,8 @@
       });
     }
   </script>
-  <script src="cloud-config.js?v=59"></script>
-  <script src="cloud-sync.js?v=59"></script>
-  <script src="customer.js?v=59"></script>
+  <script src="cloud-config.js?v=60"></script>
+  <script src="cloud-sync.js?v=60"></script>
+  <script src="customer.js?v=60"></script>
 </body>
 </html>
