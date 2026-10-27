@@ -1044,10 +1044,14 @@
     const open = state.menu === group;
     return '<section class="nav-group ' + (open ? 'open' : '') + '"><button class="nav-heading" data-menu="' + group + '"><span class="nav-heading-label">' + appIcon(icon) + '<b>' + esc(label) + '</b></span><span class="nav-chevron">⌄</span></button><div class="nav-children">' + children.map(child => '<button data-route="' + child[1] + '">' + appIcon(child[2] || icon, 'nav-child-icon') + '<span>' + esc(child[0]) + '</span></button>').join('') + '</div></section>';
   }
+  function poweredFooter() {
+    const year = new Date().getFullYear();
+    return '<footer class="app-credit" aria-label="Créditos"><div class="app-credit-legal"><span>Todos os direitos reservados · Gelatos Lele · ' + year + '</span><span>Ícones: <a href="https://www.flaticon.com/uicons" target="_blank" rel="noopener">Flaticon UIcons</a></span></div><div class="developer-credit"><span class="developer-mark" aria-hidden="true"><i>J</i><i>S</i></span><span class="developer-credit-copy"><small>Powered by</small><b>Jhonathan Scolaro</b></span></div></footer>';
+  }
   function shell() {
     if (cloudInitialLoad) return '<div class="boot cloud-boot"><strong>Conectando sua empresa…</strong><span>Estamos conferindo a cópia mais recente antes de liberar alterações.</span></div><div id="toast" role="status" aria-live="polite"></div>';
     const needsAuth = state.screen === 'settings-cloud' && (!window.GelatosCloud?.hasSession() || window.GelatosCloud?.isPasswordRecovery?.());
-    if (needsAuth) return '<div class="auth-shell">' + settingsScreen() + '<footer class="app-credit" aria-label="Créditos">Powered by Jhonathan</footer></div><div id="toast" role="status" aria-live="polite"></div>';
+    if (needsAuth) return '<div class="auth-shell">' + settingsScreen() + poweredFooter() + '</div><div id="toast" role="status" aria-live="polite"></div>';
     const unread = visibleNotifications().filter(item => !item.read).length;
     return '<div class="app-shell"><header class="topbar"><button class="icon-button" data-action="open-menu" aria-label="Abrir menu">' + appIcon('menu') + '</button><img class="brand" src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="bell-button" data-action="open-notices" aria-label="Notificações">' + appIcon('bell') + (unread ? '<b>' + unread + '</b>' : '') + '</button><button id="installCta" class="install-cta" hidden>Instalar</button></header><div class="drawer-shade" data-action="close-menu"></div><aside class="drawer"><div class="drawer-brand"><img src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="icon-button" data-action="close-menu" aria-label="Fechar menu">×</button></div><nav><button class="nav-home" data-route="home">' + appIcon('home') + '<span>Tela inicial</span></button>' +
       navGroup('Controle de pedidos', 'orders', [['Novo pedido', 'orders:new', 'plus'], ['Pedidos realizados', 'orders:history', 'orders'], ['Programação de encomendas', 'orders:calendar', 'calendar']], 'orders') +
@@ -1058,7 +1062,7 @@
       navGroup('Cadastros', 'records', [['Cadastrar compra', 'stock:purchase', 'cart'], ['Cardápio / sabores', 'records:catalog', 'tag'], ['Categorias de geladinhos', 'records:categories', 'records'], ['Ingredientes', 'stock:ingredient', 'recipe'], ['Insumos', 'stock:supply', 'stock'], ['Fornecedores', 'records:suppliers', 'people'], ['Nova receita', 'recipes', 'recipe']], 'records') +
       navGroup('Ferramentas', 'tools', [['Preços e compras', 'tools:compare', 'price'], ['Produção possível', 'tools:capacity', 'capacity']], 'tools') +
       navGroup('Configurações', 'settings', [['Visão geral', 'settings:home', 'settings'], ['Nuvem e sincronização', 'settings:cloud', 'cloud'], ['Logo do app', 'settings:appearance', 'image'], ['Mensagem e Pix', 'settings:message', 'message'], ['Cardápio do cliente', 'settings:catalog', 'cart'], ['Frete e entrega', 'settings:delivery', 'delivery'], ['Backup', 'settings:backup', 'backup']], 'settings') +
-      '</nav></aside><main class="screen-' + esc(state.screen) + '">' + inAppBackButton() + screen() + '</main><footer class="app-credit" aria-label="Créditos">Powered by Jhonathan</footer>' + noticesPanel() + infoPanel() + '</div><div id="toast" role="status" aria-live="polite"></div>';
+      '</nav></aside><main class="screen-' + esc(state.screen) + '">' + inAppBackButton() + screen() + '</main>' + poweredFooter() + noticesPanel() + infoPanel() + '</div><div id="toast" role="status" aria-live="polite"></div>';
   }
   function heading(kicker, title, description) {
     return '<div class="screen-heading"><p>' + esc(kicker) + '</p><h1>' + esc(title) + '</h1><span>' + esc(description) + '</span></div>';
@@ -2348,7 +2352,7 @@
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=63';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=64';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -2357,7 +2361,7 @@
   }
   function managementCatalogLink() {
     const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    return base + 'customer.html?v=63&gestao=1';
+    return base + 'customer.html?v=64&gestao=1';
   }
   function noticesPanel() {
     if (!state.notices) return '';

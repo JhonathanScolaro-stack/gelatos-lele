@@ -1,0 +1,113 @@
+/* v62 — cardápio do cliente com o mesmo painel claro, organizado e direto da
+   gestão. Mantém a paleta e usa sempre a logo configurada pela empresa. */
+
+:root { --catalog-cocoa:#482d35; --catalog-rose:#cc5c78; --catalog-line:#e7d1d6; }
+body {
+  background:
+    radial-gradient(760px 300px at 50% -130px, rgba(229,151,171,.25), transparent 70%),
+    linear-gradient(180deg, #fff8f7 0, #fffdfc 52%, #fff8f8 100%);
+}
+main { width: min(100%, 860px); padding: clamp(15px, 3vw, 30px) clamp(13px, 3vw, 28px) 74px; }
+.hero {
+  min-height: 204px;
+  padding: 26px 20px 22px;
+  border: 1px solid rgba(110, 45, 61, .33);
+  border-radius: 19px;
+  background:
+    radial-gradient(205px 160px at 105% -24%, rgba(255,255,255,.20), transparent 70%),
+    linear-gradient(135deg, #4c2a33 0, #884157 55%, #cf617c 100%);
+  box-shadow: 0 18px 40px rgba(98,37,54,.19);
+}
+.catalog-logo { max-width: min(76%, 308px); max-height: 124px; margin: 3px auto 4px; object-fit: contain; }
+.back-app { border-radius: 10px; }
+.catalog-heading { align-items: center; margin-top: 24px; }
+.catalog-heading h2 { color: var(--catalog-cocoa); font-family: Georgia, 'Times New Roman', serif; font-size: clamp(23px, 5.8vw, 29px); }
+.catalog-refresh { min-height: 38px; border-color: var(--catalog-line); border-radius: 10px; background: #fff; color: #9d4058; }
+
+.fulfillment-picker,
+.notice,
+.panel {
+  border-color: var(--catalog-line);
+  border-radius: 17px;
+  background: rgba(255,255,255,.93);
+  box-shadow: 0 10px 25px rgba(80,35,47,.065);
+}
+.fulfillment-picker { padding: 16px; }
+.fulfillment-picker button { min-height: 92px; border-color: #ead6db; border-radius: 15px; background: #fff; }
+.fulfillment-picker button.selected { border-color: #c8758a; background: linear-gradient(145deg, #fff2f5, #fff); box-shadow: 0 0 0 3px rgba(204,92,120,.11); }
+.catalog-type { gap: 10px; }
+.catalog-category-toggle {
+  min-height: 76px;
+  border-color: var(--catalog-line);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 8px 19px rgba(80,35,47,.055);
+}
+.catalog-category-toggle>span.catalog-category-icon:first-child { border-radius: 12px; }
+.catalog-type.is-open .catalog-category-toggle { border-color: #d890a2; }
+.product {
+  border-color: var(--catalog-line);
+  border-radius: 17px;
+  box-shadow: 0 8px 19px rgba(80,35,47,.055);
+}
+.product-open { border-radius: 16px; }
+.product img,.product .image-placeholder { border-radius: 13px; }
+.product-picker { border-top-color: #efdbdf; background: #fffafa; }
+.quantity button { border: 1px solid #ead4da; }
+.panel { margin-top: 17px; padding: 17px; }
+.panel h2 { color: var(--catalog-cocoa); font-family: Georgia, 'Times New Roman', serif; }
+input,select,textarea { border-color: #e4cdd2; border-radius: 11px; }
+input:focus,select:focus,textarea:focus { border-color: #ce617c; box-shadow: 0 0 0 3px rgba(206,97,124,.13); }
+.primary { background: linear-gradient(135deg, #db6b85, #bd4864); box-shadow: 0 9px 18px rgba(189,72,100,.21); }
+.outline { border-color: #e2c6ce; color: #9d4058; }
+.checkout-actions { gap: 9px; }
+.cart-lines li { border: 1px solid #f0dce0; background: #fff9fa; }
+.review-details { overflow-wrap: anywhere; }
+.total { border-top-color: #ecd7dc; }
+.catalog-credit {
+  margin: 24px 0 0;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  color: #ae979e;
+  font-size: 10px;
+  letter-spacing: .035em;
+  text-align: center;
+}
+
+@media (max-width: 430px) {
+  .hero { min-height: 190px; padding: 22px 15px 18px; }
+  .catalog-logo { max-height: 108px; }
+  .catalog-heading { align-items: flex-start; }
+  .catalog-refresh { width: 100%; }
+  .checkout-actions { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Assinatura institucional no mesmo padrão do painel de compras Momentum. */
+.catalog-credit {
+  display: flex;
+  width: 100%;
+  margin: 28px 0 0;
+  padding: 23px 0 calc(13px + env(safe-area-inset-bottom));
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 15px;
+  color: #9a8189;
+  font-size: 10px;
+  letter-spacing: 0;
+  text-align: left;
+}
+.catalog-credit-legal { display: grid; gap: 5px; line-height: 1.25; }
+.catalog-credit-legal a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.developer-credit { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; color: #72515b; }
+.developer-mark { display: inline-flex; width: 30px; height: 25px; align-items: center; justify-content: center; font-family: Arial, sans-serif; font-size: 19px; font-style: italic; font-weight: 900; letter-spacing: -8px; transform: skewX(-10deg); }
+.developer-mark i { font-style: normal; }
+.developer-mark i:first-child { color: #337fe0; }
+.developer-mark i:last-child { color: #8b4dcc; }
+.developer-credit-copy { display: grid; gap: 1px; line-height: 1.05; }
+.developer-credit-copy small { color: #a78f97; font-size: 8px; }
+.developer-credit-copy b { color: #5a3b45; font-size: 11px; font-weight: 800; white-space: nowrap; }
+@media (max-width: 430px) {
+  .catalog-credit { align-items: center; }
+  .catalog-credit-legal { font-size: 9px; }
+  .developer-mark { width: 25px; font-size: 17px; }
+  .developer-credit-copy b { font-size: 10px; }
+}
