@@ -24,11 +24,11 @@
     // permaneçam presos aos arquivos de uma versão anterior do cardápio.
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('./service-worker.js?v=62').then(function (registration) {
+        navigator.serviceWorker.register('./service-worker.js?v=63').then(function (registration) {
           registration.update().catch(function () {});
           navigator.serviceWorker.addEventListener('controllerchange', function () {
-            if (sessionStorage.getItem('gelatos-catalog-reloaded-v62')) return;
-            sessionStorage.setItem('gelatos-catalog-reloaded-v62', '1');
+            if (sessionStorage.getItem('gelatos-catalog-reloaded-v63')) return;
+            sessionStorage.setItem('gelatos-catalog-reloaded-v63', '1');
             window.location.reload();
           }, { once: true });
         }).catch(function () {

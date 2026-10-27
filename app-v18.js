@@ -1033,23 +1033,12 @@
   };
   // Ícones UIcons usados nas ações que a equipe enxerga com mais frequência.
   // Os demais preservam o SVG local para o aplicativo continuar claro offline.
-  const UI_UICONS = {
-    menu: 'fi-sr-menu-burger',
-    back: 'fi-sr-angle-left',
-    home: 'fi-sr-home',
-    orders: 'fi-sr-shopping-bag',
-    plus: 'fi-sr-add',
-    cart: 'fi-sr-shopping-cart',
-    settings: 'fi-sr-settings',
-    people: 'fi-sr-users-alt',
-    message: 'fi-sr-envelope',
-    delivery: 'fi-sr-marker',
-    tag: 'fi-sr-tag',
-    image: 'fi-sr-picture'
-  };
+  // Os pictogramas do aplicativo são mantidos no próprio arquivo. A fonte
+  // externa da Flaticon pode ser bloqueada pelo navegador/instalação PWA e,
+  // nesse caso, deixava alguns botões sem ícone. Os SVGs seguem a mesma
+  // linguagem visual e não dependem de rede para renderizar corretamente.
   function appIcon(name, className = '') {
-    const uicon = UI_UICONS[name] || '';
-    return '<span class="icon-token icon-' + esc(name) + (uicon ? ' has-uicon' : '') + ' ' + esc(className) + '" aria-hidden="true">' + (uicon ? '<i class="fi ' + uicon + '"></i>' : '') + '<svg class="app-icon" viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' + (UI_ICONS[name] || UI_ICONS.records) + '</svg></span>';
+    return '<span class="icon-token icon-' + esc(name) + ' ' + esc(className) + '" aria-hidden="true"><svg class="app-icon" viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' + (UI_ICONS[name] || UI_ICONS.records) + '</svg></span>';
   }
   function navGroup(label, group, children, icon = 'records') {
     const open = state.menu === group;
@@ -2359,7 +2348,7 @@
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=62';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=63';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -2368,7 +2357,7 @@
   }
   function managementCatalogLink() {
     const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    return base + 'customer.html?v=62&gestao=1';
+    return base + 'customer.html?v=63&gestao=1';
   }
   function noticesPanel() {
     if (!state.notices) return '';
