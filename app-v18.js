@@ -1044,9 +1044,12 @@
     const open = state.menu === group;
     return '<section class="nav-group ' + (open ? 'open' : '') + '"><button class="nav-heading" data-menu="' + group + '"><span class="nav-heading-label">' + appIcon(icon) + '<b>' + esc(label) + '</b></span><span class="nav-chevron">⌄</span></button><div class="nav-children">' + children.map(child => '<button data-route="' + child[1] + '">' + appIcon(child[2] || icon, 'nav-child-icon') + '<span>' + esc(child[0]) + '</span></button>').join('') + '</div></section>';
   }
+  function developerSignature() {
+    return '<div class="developer-credit" aria-label="Powered by Jhonathan Scolaro"><svg class="developer-mark" viewBox="0 0 34 28" aria-hidden="true" focusable="false"><defs><linearGradient id="developerBlue" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#1fa5e8"/><stop offset="1" stop-color="#2468d8"/></linearGradient><linearGradient id="developerViolet" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#7c58e7"/><stop offset="1" stop-color="#254fc8"/></linearGradient></defs><path fill="url(#developerBlue)" d="M15.8 2.5h5.2v13.1c0 6.4-4 10-10 10-4.7 0-8.3-2-10.2-5.6l4.8-2.8c.9 1.8 2.4 2.8 4.3 2.8 3.1 0 4.9-1.7 4.9-5.3z"/><path fill="url(#developerViolet)" d="M24.5 2.5c3.9 0 6.9 1.5 8.8 4.1l-4.1 3.1c-1.2-1.5-2.7-2.2-4.6-2.2-1.7 0-2.7.6-2.7 1.7 0 1 .8 1.5 3.8 2.2 5.4 1.3 8 3.6 8 7.6 0 4.5-3.7 7.1-9.1 7.1-4.3 0-7.7-1.7-9.8-4.7l4.3-3.1c1.4 1.8 3.2 2.8 5.5 2.8 2 0 3.1-.7 3.1-1.9 0-1.1-.8-1.6-4.1-2.4-5.2-1.2-7.7-3.5-7.7-7.4 0-4.2 3.5-6.9 8.7-6.9z"/></svg><span class="developer-credit-copy"><small>Powered by</small><b>Jhonathan Scolaro</b></span></div>';
+  }
   function poweredFooter() {
     const year = new Date().getFullYear();
-    return '<footer class="app-credit" aria-label="Créditos"><div class="app-credit-legal"><span>Todos os direitos reservados · Gelatos Lele · ' + year + '</span><span>Ícones: <a href="https://www.flaticon.com/uicons" target="_blank" rel="noopener">Flaticon UIcons</a></span></div><div class="developer-credit"><span class="developer-mark" aria-hidden="true"><i>J</i><i>S</i></span><span class="developer-credit-copy"><small>Powered by</small><b>Jhonathan Scolaro</b></span></div></footer>';
+    return '<footer class="app-credit" aria-label="Créditos"><div class="app-credit-legal"><span>Todos os direitos reservados · Gelatos Lele · ' + year + '</span><span>Ícones: <a href="https://www.flaticon.com/uicons" target="_blank" rel="noopener">Flaticon UIcons</a></span></div>' + developerSignature() + '</footer>';
   }
   function shell() {
     if (cloudInitialLoad) return '<div class="boot cloud-boot"><strong>Conectando sua empresa…</strong><span>Estamos conferindo a cópia mais recente antes de liberar alterações.</span></div><div id="toast" role="status" aria-live="polite"></div>';
@@ -2352,7 +2355,7 @@
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=64';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=66';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -2361,7 +2364,7 @@
   }
   function managementCatalogLink() {
     const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    return base + 'customer.html?v=64&gestao=1';
+    return base + 'customer.html?v=66&gestao=1';
   }
   function noticesPanel() {
     if (!state.notices) return '';

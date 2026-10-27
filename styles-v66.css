@@ -1,0 +1,414 @@
+/* v62 — painel Gelatos Lele.
+   Inspiração estrutural: painel Momentum (hierarquia limpa, superfícies
+   compactas e uma leitura objetiva), preservando a marca em creme, cacau e
+   rosa. Esta camada também normaliza os campos que podiam estourar no celular. */
+
+:root {
+  --panel-paper: #fffdfc;
+  --panel-soft: #fff7f7;
+  --panel-line: #e7d1d6;
+  --panel-muted: #765b63;
+  --panel-ink: #3f2930;
+  --panel-pink: #cf5d79;
+  --panel-cocoa: #482d35;
+}
+
+body {
+  background:
+    radial-gradient(760px 320px at 52% -120px, rgba(232, 151, 172, .23), transparent 70%),
+    linear-gradient(180deg, #fff8f7 0, #fffdfc 51%, #fff8f8 100%);
+}
+
+/* UIcons da Flaticon entram quando a fonte oficial é carregada. O SVG local
+   continua como fallback para instalações PWA que estejam sem conexão. */
+.icon-token { display: inline-grid; width: 1.2em; height: 1.2em; place-items: center; flex: 0 0 auto; vertical-align: middle; }
+/* SVGs locais são a fonte de verdade: ficam nítidos e não somem quando o
+   Android bloqueia fontes externas dentro do PWA. */
+.icon-token .fi { display: none; line-height: 1; }
+
+.app-shell { min-height: 100dvh; }
+.auth-shell {
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-items: center;
+  background:
+    radial-gradient(520px 300px at 50% 0, rgba(237,155,177,.31), transparent 72%),
+    linear-gradient(160deg, #fffafa, #f9eaed);
+}
+.auth-screen { width: min(100%, 432px); }
+.auth-card {
+  gap: 21px;
+  padding: 30px 24px 25px;
+  border-color: var(--panel-line);
+  border-radius: 20px;
+  background: rgba(255,255,255,.96);
+  box-shadow: 0 22px 56px rgba(82,37,49,.13);
+}
+.auth-logo { max-height: 118px; }
+.auth-shell .app-credit { width: 100%; margin: 0; padding: 0; }
+.topbar {
+  min-height: 74px;
+  background: rgba(255, 252, 251, .94);
+  border-bottom-color: rgba(224, 194, 202, .76);
+  box-shadow: 0 7px 24px rgba(84, 37, 50, .07);
+}
+.brand { width: min(156px, 38vw); height: 52px; object-fit: contain; }
+.icon-button,
+.bell-button {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--panel-line);
+  border-radius: 13px;
+  background: #fff;
+  color: var(--panel-cocoa);
+  box-shadow: 0 6px 15px rgba(74, 36, 47, .08);
+}
+.icon-button .icon-token,
+.bell-button .icon-token { width: 21px; height: 21px; font-size: 21px; }
+.metric-icon .icon-token {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  font-size: 20px;
+}
+.shortcuts button .icon-token {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 8px;
+  place-items: center;
+  border: 1px solid rgba(211,93,119,.17);
+  border-radius: 12px;
+  background: #fff1f4;
+  color: #a33f58;
+  font-size: 19px;
+}
+
+main {
+  width: min(100%, 980px);
+  padding: 19px 16px 26px;
+}
+.screen-heading {
+  margin-top: 1px;
+  padding: 19px 20px 20px;
+  border-color: var(--panel-line);
+  border-radius: 18px;
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.96), rgba(255,246,247,.90)),
+    var(--panel-paper);
+  box-shadow: 0 12px 30px rgba(83, 37, 49, .075);
+}
+.screen-heading::before { top: 19px; height: 30px; background: linear-gradient(#d96782, #9f4056); }
+.screen-heading h1 { color: var(--panel-ink); font-family: Georgia, 'Times New Roman', serif; }
+.screen-heading > span { color: var(--panel-muted); }
+
+.in-app-back {
+  min-height: 38px;
+  margin: 0 0 11px;
+  color: var(--panel-cocoa);
+  border-color: var(--panel-line);
+}
+.in-app-back .icon-token { display: grid; width: 19px; height: 19px; place-items: center; border-radius: 7px; background: #fff0f3; color: #a44058; font-size: 14px; }
+
+/* Paineis e formulários — limita tudo à largura real da tela antes de
+   estilizar os inputs. Isso elimina o estouro de colunas no S25 e menores. */
+.panel,
+.form-panel,
+.filters,
+.report-summary,
+.purchase-metrics,
+.price-history,
+.schedule-panel {
+  max-width: 100%;
+  border-color: var(--panel-line);
+  border-radius: 17px;
+  background: var(--panel-paper);
+  box-shadow: 0 10px 25px rgba(80, 35, 47, .065);
+}
+.panel,
+.form-panel { padding: 17px; }
+.form-panel::before { right: 17px; left: 17px; background: linear-gradient(90deg, transparent, #d96a83, transparent); }
+.form-grid,
+.form-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.form-grid > *,
+.form-grid.two > *,
+.form-field,
+.customer-link > * { min-width: 0; }
+.form-field { gap: 7px; }
+.form-field > span { color: #65464f; font-size: 12px; font-weight: 850; }
+input,
+select,
+textarea { max-width: 100%; border-color: #e3cdd2; border-radius: 11px; background: #fff; }
+input:focus,
+select:focus,
+textarea:focus { border-color: #d0647f; box-shadow: 0 0 0 3px rgba(208,100,127,.13); }
+.readonly-field { background: #faf2f3; }
+
+.button-row,
+.isolated-actions { gap: 9px; }
+.primary,
+.secondary,
+.outline,
+.text-button { min-height: 42px; border-radius: 11px; }
+.primary { background: linear-gradient(135deg, #db6b85, #bd4864); }
+.secondary { background: linear-gradient(135deg, #64404a, #482d35); }
+.outline { border-color: #e0c6cd; background: #fff; color: #9d4056; }
+.resale-confirmation .icon-token { width: 17px; height: 17px; font-size: 16px; }
+
+/* Navegação: mesmos blocos informativos do painel de referência, adaptados
+   ao menu recolhível para não aumentar a página. */
+.drawer {
+  width: min(348px, calc(100vw - 46px));
+  padding: 15px 13px;
+  background: linear-gradient(180deg, #fffdfc, #fff7f7);
+  border-right-color: #e7d1d6;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.drawer::-webkit-scrollbar { width: 0; height: 0; }
+.drawer-brand { min-height: 78px; padding: 3px 5px 11px 9px; }
+.drawer-brand img { width: 183px; height: 59px; object-fit: contain; }
+.drawer .nav-home .icon-token,
+.drawer .nav-heading-label .icon-token {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 10px;
+  background: #fff0f3;
+  color: #a33f58;
+  font-size: 17px;
+}
+.drawer .nav-children .icon-token { width: 17px; height: 17px; color: #ad5067; font-size: 15px; }
+.nav-home { margin-bottom: 8px; border: 1px solid #ead5da; border-radius: 13px; background: #fff; }
+.nav-heading { min-height: 52px; border-radius: 12px; }
+.nav-children { margin-left: 16px; padding-left: 10px; }
+.nav-children button { min-height: 40px; }
+
+/* Listas, detalhes, relatórios e configurações: todos passam a usar o mesmo
+   cartão de leitura, com valor alinhado e seta de abertura previsível. */
+.list { gap: 10px; }
+.list-card { border-color: var(--panel-line); border-radius: 16px; box-shadow: 0 7px 18px rgba(80, 35, 47, .055); }
+.list-card[open] { border-color: #d795a6; box-shadow: 0 14px 30px rgba(80,35,47,.10); }
+.list-main { min-height: 72px; padding: 14px 15px; }
+.list-main h3 { color: var(--panel-ink); }
+.list-summary-value { min-width: 84px; }
+.details-body { padding: 14px 15px 16px; background: linear-gradient(180deg, #fff9fa, #fffefd); }
+.details-body dl { max-width: 100%; overflow-wrap: anywhere; }
+.details-actions { gap: 8px; }
+.details-actions button { min-height: 40px; }
+.filters { display: grid; padding: 13px; gap: 10px; }
+.tabs { padding: 4px; border-color: #ead6db; border-radius: 14px; background: #fffafa; }
+.tab { min-height: 38px; }
+.tab.active { background: linear-gradient(135deg, #d96a83, #bf4965); }
+
+.settings-list { gap: 10px; }
+.settings-list button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  min-height: 82px;
+  padding: 15px 14px 15px 16px;
+  border-color: var(--panel-line);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 7px 18px rgba(80,35,47,.055);
+}
+.settings-list button b,
+.settings-list button span { grid-column: 1; min-width: 0; }
+.settings-list button::after { position: static; grid-row: 1 / span 2; grid-column: 2; align-self: center; margin: 0; color: #aa4760; }
+.settings-list button span { overflow-wrap: anywhere; }
+.message-fields,
+.catalog-switch,
+.zone-rule { max-width: 100%; border-color: #ecd7dc; border-radius: 13px; }
+.customer-link { grid-template-columns: minmax(0, 1fr) auto; }
+
+.order-line,
+.recipe-item,
+.resale-line,
+.delivery-zone-row { min-width: 0; }
+.recipe-item > *,
+.order-line > *,
+.resale-line > *,
+.delivery-zone-row > * { min-width: 0; }
+.calculation-row,
+.calculation-breakdown { border-color: #eed9de; background: #fff7f8; }
+.schedule-day { min-width: 0; border-color: #ead6db; }
+.purchase-metrics > div { min-width: 0; background: #fff8f9; }
+
+/* A assinatura é propositalmente discreta e fica no fluxo final da página. */
+.app-credit {
+  width: min(100%, 980px);
+  margin: -3px auto 0;
+  padding: 0 16px calc(18px + env(safe-area-inset-bottom));
+  color: #ad979d;
+  font-size: 10px;
+  letter-spacing: .035em;
+  text-align: center;
+}
+
+@media (min-width: 720px) {
+  main { padding: 25px 28px 32px; }
+  .app-credit { padding-right: 28px; padding-left: 28px; }
+  .details-actions { display: flex; }
+}
+
+@media (max-width: 560px) {
+  .form-grid,
+  .form-grid.two { grid-template-columns: minmax(0, 1fr); }
+  .screen-heading { padding: 16px; }
+  .screen-heading h1 { font-size: 29px; }
+  .customer-link { grid-template-columns: minmax(0, 1fr); }
+  .customer-link button { width: 100%; }
+}
+
+@media (max-width: 390px) {
+  main { padding-right: 12px; padding-left: 12px; }
+  .panel,.form-panel { padding: 14px; }
+  .list-main { padding: 13px; }
+  .list-summary-value { min-width: 72px; }
+  .details-actions button { width: 100%; }
+}
+
+/* v64 — aplicação literal da estrutura vista no painel Momentum: superfícies
+   limpas, linhas nítidas e assinatura institucional separada do conteúdo. */
+.screen-heading,
+.panel,
+.form-panel,
+.filters,
+.report-summary,
+.purchase-metrics,
+.price-history,
+.schedule-panel,
+.list-card,
+.settings-list button {
+  border-radius: 14px;
+  box-shadow: none;
+}
+.screen-heading { border-width: 1px; }
+.metric { box-shadow: none; border-top: 3px solid #cf5d79; }
+.metric:nth-child(3n+2) { border-top-color: #bf8a51; }
+.metric:nth-child(3n) { border-top-color: #9a7282; }
+
+/* Rodapé no mesmo arranjo do painel de compras: informações institucionais
+   à esquerda e assinatura do desenvolvedor à direita. */
+.app-credit {
+  display: flex;
+  width: min(100%, 980px);
+  min-height: 76px;
+  margin: 0 auto;
+  padding: 27px 16px calc(21px + env(safe-area-inset-bottom));
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  color: #9a8189;
+  font-size: 10px;
+  letter-spacing: 0;
+  text-align: left;
+}
+.app-credit-legal,
+.catalog-credit-legal { display: grid; gap: 5px; line-height: 1.25; }
+.app-credit-legal a,
+.catalog-credit-legal a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.developer-credit { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; color: #72515b; }
+.developer-mark {
+  display: inline-flex;
+  width: 30px;
+  height: 25px;
+  align-items: center;
+  justify-content: center;
+  font-family: Arial, sans-serif;
+  font-size: 19px;
+  font-style: italic;
+  font-weight: 900;
+  letter-spacing: -8px;
+  transform: skewX(-10deg);
+}
+.developer-mark i { font-style: normal; }
+.developer-mark i:first-child { color: #337fe0; }
+.developer-mark i:last-child { color: #8b4dcc; }
+.developer-credit-copy { display: grid; gap: 1px; line-height: 1.05; }
+.developer-credit-copy small { color: #a78f97; font-size: 8px; }
+.developer-credit-copy b { color: #5a3b45; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.auth-shell .app-credit { width: 100%; margin: 0; padding: 8px 24px calc(18px + env(safe-area-inset-bottom)); justify-content: center; }
+.auth-shell .app-credit-legal { display: none; }
+
+@media (min-width: 720px) { .app-credit { padding-right: 28px; padding-left: 28px; } }
+@media (max-width: 430px) {
+  .app-credit { min-height: 0; padding-top: 22px; align-items: center; }
+  .app-credit-legal { font-size: 9px; }
+  .developer-mark { width: 25px; font-size: 17px; }
+  .developer-credit-copy b { font-size: 10px; }
+}
+
+/* Assinatura compacta: mesmas proporções conferidas no painel de referência.
+   A grade impede que um texto longo alargue a tela de celulares estreitos. */
+html, body, #app, .app-shell { max-width: 100%; overflow-x: clip; }
+.app-credit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 143px;
+  width: 100%;
+  min-height: 76px;
+  margin: 0;
+  padding: 20px max(16px, env(safe-area-inset-left)) calc(20px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-right));
+  align-items: end;
+  column-gap: 12px;
+  background: #071d34;
+  color: #9cb2cd;
+}
+.app-credit-legal { min-width: 0; overflow-wrap: anywhere; }
+.app-credit-legal a { color: #9cb2cd; }
+.developer-credit {
+  display: flex;
+  flex: 0 0 143px;
+  width: 143px;
+  height: 33px;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  justify-self: end;
+  color: #9cb2cd;
+}
+.developer-mark {
+  display: block;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 28px;
+  transform: none;
+}
+.developer-mark i { display: none; }
+.developer-credit-copy { display: block; width: 100px; height: 33px; min-width: 0; line-height: 1; }
+.developer-credit-copy small { display: block; height: 14.4px; color: #9cb2cd; font: 400 9px/14.4px Inter, "Segoe UI", Arial, sans-serif; }
+.developer-credit-copy b { display: block; height: 15.6px; color: #d8e9f8; font: 600 12px/15.6px "Segoe UI", Arial, sans-serif; letter-spacing: 0; white-space: nowrap; }
+.auth-shell .app-credit { width: 100%; padding: 16px max(16px, env(safe-area-inset-left)) calc(16px + env(safe-area-inset-bottom)); justify-content: unset; }
+.auth-shell .developer-credit { grid-column: 1 / -1; justify-self: center; }
+@media (max-width: 360px) {
+  .app-credit { grid-template-columns: minmax(0, 1fr); row-gap: 15px; align-items: start; }
+  .developer-credit { grid-column: 1; justify-self: start; }
+}
+
+/* O fundo pertence ao contêiner do ícone. As regras antigas também davam
+   fundo, borda e padding ao próprio SVG, comprimindo alguns desenhos (como a
+   engrenagem de Configurações) até eles parecerem vazios no Android. */
+.drawer .nav-home .app-icon,
+.drawer .nav-heading-label .app-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  box-shadow: none;
+  stroke-width: 1.9;
+}
+.drawer .nav-children .app-icon {
+  display: block;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  stroke-width: 1.9;
+}
