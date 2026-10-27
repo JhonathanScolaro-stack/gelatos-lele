@@ -28,7 +28,7 @@
     const type = productType(value);
     return type === 'Água' ? 'agua' : type === 'Leite' ? 'leite' : 'gourmet';
   };
-  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=61';
+  const managementUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.html?v=62';
   const openedFromManagement = () => new URLSearchParams(location.search).get('gestao') === '1';
   const ORDER_ATTEMPT_KEY = 'gelatos-lele-customer-order-attempt-v1';
   const CUSTOMER_CLIENT_KEY = 'gelatos-lele-customer-client-v1';
@@ -191,6 +191,7 @@
     const link = personalWhatsAppHref(phone, 'Olá! Vim pelo cardápio da ' + String(catalog?.brand || 'Gelatos Lele') + ' e gostaria de tirar uma dúvida.');
     return '<a class="catalog-whatsapp" href="' + esc(link.href) + '" target="' + link.target + '" rel="noopener" aria-label="Falar com a Gelatos Lele no WhatsApp pessoal" title="Falar no WhatsApp pessoal"><svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d="M16 4.5a11.2 11.2 0 0 0-9.6 17l-1.3 5.9 6-1.5A11.2 11.2 0 1 0 16 4.5Zm0 20.4a9.1 9.1 0 0 1-4.35-1.1l-.42-.23-3.55.89.91-3.47-.27-.45A9.1 9.1 0 1 1 16 24.9Zm5-6.8c-.28-.14-1.65-.81-1.9-.9-.26-.1-.44-.14-.63.14-.18.27-.72.9-.88 1.08-.16.19-.32.21-.6.07-1.64-.81-2.72-1.45-3.8-3.29-.28-.48.28-.45.8-1.5.1-.2.05-.37-.02-.51-.07-.14-.63-1.52-.86-2.08-.23-.55-.47-.48-.64-.49h-.55c-.2 0-.51.07-.78.37-.27.3-1.03 1.01-1.03 2.46s1.06 2.85 1.2 3.05c.15.2 2.09 3.2 5.08 4.49.71.31 1.26.49 1.69.62.71.22 1.35.19 1.86.11.57-.09 1.65-.67 1.89-1.32.23-.65.23-1.21.16-1.32-.06-.12-.25-.19-.53-.33Z" fill="currentColor"/></svg></a>';
   }
+  const catalogCredit = () => '<footer class="catalog-credit" aria-label="Créditos">Powered by Jhonathan</footer>';
   function selectedProducts() { return catalog.products.filter(product => quantities[product.id] > 0); }
   function catalogCategories() {
     const entries = Array.isArray(catalog?.categories) ? catalog.categories : [];
@@ -362,7 +363,7 @@
     root.innerHTML = '<section class="hero">' + managementBack() + '<img class="catalog-logo" src="' + esc(logo) + '" alt="' + esc(catalog.brand || 'Gelatos Lele') + '"><h1 class="catalog-brand-name">' + esc(catalog.brand || 'Gelatos Lele') + '</h1><p>' + esc(catalog.intro || 'Confira os sabores disponíveis.') + '</p></section>' +
       (catalog.address ? '<section class="notice"><b>Informações:</b><br>' + esc(catalog.address).replace(/\n/g, '<br>') + '</section>' : '') +
       fulfillmentChooser() + '<section class="products"><div class="catalog-heading"><div><h2>' + (isScheduled() ? 'Cardápio para encomenda' : 'Cardápio pronta entrega') + '</h2><span>' + (isScheduled() ? 'Escolha sabores para a data desejada. A produção será confirmada pela Gelatos Lele.' : 'Escolha por tipo e toque em um sabor para informar a quantidade.') + '</span></div><button type="button" class="catalog-refresh" data-action="refresh-catalog">Atualizar disponibilidade</button></div>' + products + '</section>' +
-      (reviewing ? reviewForm(result) : orderForm(result, zones, modes)) + customerWhatsAppButton();
+      (reviewing ? reviewForm(result) : orderForm(result, zones, modes)) + catalogCredit() + customerWhatsAppButton();
   }
   function confirmation(result) {
     const freight = num(result.freight) > 0 ? '<p>Frete: ' + money.format(num(result.freight)) + '</p>' : '';
@@ -372,7 +373,7 @@
     const reserved = (result.items || []).reduce((sum, item) => sum + num(item.reservedQuantity ?? (scheduled ? 0 : item.quantity)), 0);
     const pending = (result.items || []).reduce((sum, item) => sum + num(item.pendingProductionQuantity ?? (scheduled ? item.quantity : 0)), 0);
     const allocation = scheduled ? '<p><b>' + reserved + ' geladinho(s) já foram separados.</b>' + (pending > 0 ? '<br>' + pending + ' geladinho(s) ficaram programados para produção.' : '') + '</p>' : '';
-    root.innerHTML = '<section class="hero">' + managementBack() + '<h1>Pedido recebido</h1><p>' + (scheduled ? 'Recebemos sua encomenda e já separamos automaticamente tudo o que estava pronto.' : 'Recebemos seu pedido e reservamos os geladinhos selecionados temporariamente.') + '</p></section><section class="panel confirmation"><h2>Total: ' + money.format(num(result.total)) + '</h2><p>Pedido nº ' + esc(result.orderId) + '. A Gelatos Lele confirmará os próximos passos pelo WhatsApp informado.</p>' + schedule + allocation + reservation + freight + '<button class="primary" id="newOrder">Fazer outro pedido</button></section>' + customerWhatsAppButton();
+    root.innerHTML = '<section class="hero">' + managementBack() + '<h1>Pedido recebido</h1><p>' + (scheduled ? 'Recebemos sua encomenda e já separamos automaticamente tudo o que estava pronto.' : 'Recebemos seu pedido e reservamos os geladinhos selecionados temporariamente.') + '</p></section><section class="panel confirmation"><h2>Total: ' + money.format(num(result.total)) + '</h2><p>Pedido nº ' + esc(result.orderId) + '. A Gelatos Lele confirmará os próximos passos pelo WhatsApp informado.</p>' + schedule + allocation + reservation + freight + '<button class="primary" id="newOrder">Fazer outro pedido</button></section>' + catalogCredit() + customerWhatsAppButton();
     document.getElementById('newOrder')?.addEventListener('click', () => {
       orderAttemptId = '';
       sessionStorage.removeItem(ORDER_ATTEMPT_KEY);

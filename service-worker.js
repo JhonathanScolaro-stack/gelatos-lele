@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v61-complete-modules';
+const CACHE = 'gelatos-lele-company-v62-stable-release';
 const ASSETS = [
   './',
   './index.html',
@@ -9,6 +9,7 @@ const ASSETS = [
   './styles-v59.css',
   './styles-v60.css',
   './styles-v61.css',
+  './styles-v62.css',
   './business-core.js',
   './cloud-config.js',
   './cloud-sync.js',
@@ -26,6 +27,7 @@ const ASSETS = [
   './customer-v53.css',
   './customer-v59.css',
   './customer-v60.css',
+  './customer-v62.css',
   './customer.js'
 ];
 self.addEventListener('install', event => {

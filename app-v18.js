@@ -1031,8 +1031,25 @@
     price: '<path d="M4 19V5h11l5 5v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 9h6M8 13h7M8 17h4"/>',
     capacity: '<path d="M4 20V9l8-5 8 5v11"/><path d="M8 20v-6h8v6M10 9h4"/>'
   };
+  // Ícones UIcons usados nas ações que a equipe enxerga com mais frequência.
+  // Os demais preservam o SVG local para o aplicativo continuar claro offline.
+  const UI_UICONS = {
+    menu: 'fi-sr-menu-burger',
+    back: 'fi-sr-angle-left',
+    home: 'fi-sr-home',
+    orders: 'fi-sr-shopping-bag',
+    plus: 'fi-sr-add',
+    cart: 'fi-sr-shopping-cart',
+    settings: 'fi-sr-settings',
+    people: 'fi-sr-users-alt',
+    message: 'fi-sr-envelope',
+    delivery: 'fi-sr-marker',
+    tag: 'fi-sr-tag',
+    image: 'fi-sr-picture'
+  };
   function appIcon(name, className = '') {
-    return '<svg class="app-icon icon-' + esc(name) + ' ' + esc(className) + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' + (UI_ICONS[name] || UI_ICONS.records) + '</svg>';
+    const uicon = UI_UICONS[name] || '';
+    return '<span class="icon-token icon-' + esc(name) + (uicon ? ' has-uicon' : '') + ' ' + esc(className) + '" aria-hidden="true">' + (uicon ? '<i class="fi ' + uicon + '"></i>' : '') + '<svg class="app-icon" viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' + (UI_ICONS[name] || UI_ICONS.records) + '</svg></span>';
   }
   function navGroup(label, group, children, icon = 'records') {
     const open = state.menu === group;
@@ -1041,7 +1058,7 @@
   function shell() {
     if (cloudInitialLoad) return '<div class="boot cloud-boot"><strong>Conectando sua empresa…</strong><span>Estamos conferindo a cópia mais recente antes de liberar alterações.</span></div><div id="toast" role="status" aria-live="polite"></div>';
     const needsAuth = state.screen === 'settings-cloud' && (!window.GelatosCloud?.hasSession() || window.GelatosCloud?.isPasswordRecovery?.());
-    if (needsAuth) return '<div class="auth-shell">' + settingsScreen() + '</div><div id="toast" role="status" aria-live="polite"></div>';
+    if (needsAuth) return '<div class="auth-shell">' + settingsScreen() + '<footer class="app-credit" aria-label="Créditos">Powered by Jhonathan</footer></div><div id="toast" role="status" aria-live="polite"></div>';
     const unread = visibleNotifications().filter(item => !item.read).length;
     return '<div class="app-shell"><header class="topbar"><button class="icon-button" data-action="open-menu" aria-label="Abrir menu">' + appIcon('menu') + '</button><img class="brand" src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="bell-button" data-action="open-notices" aria-label="Notificações">' + appIcon('bell') + (unread ? '<b>' + unread + '</b>' : '') + '</button><button id="installCta" class="install-cta" hidden>Instalar</button></header><div class="drawer-shade" data-action="close-menu"></div><aside class="drawer"><div class="drawer-brand"><img src="' + esc(headerLogo()) + '" alt="Gelatos Lele"><button class="icon-button" data-action="close-menu" aria-label="Fechar menu">×</button></div><nav><button class="nav-home" data-route="home">' + appIcon('home') + '<span>Tela inicial</span></button>' +
       navGroup('Controle de pedidos', 'orders', [['Novo pedido', 'orders:new', 'plus'], ['Pedidos realizados', 'orders:history', 'orders'], ['Programação de encomendas', 'orders:calendar', 'calendar']], 'orders') +
@@ -1052,7 +1069,7 @@
       navGroup('Cadastros', 'records', [['Cadastrar compra', 'stock:purchase', 'cart'], ['Cardápio / sabores', 'records:catalog', 'tag'], ['Categorias de geladinhos', 'records:categories', 'records'], ['Ingredientes', 'stock:ingredient', 'recipe'], ['Insumos', 'stock:supply', 'stock'], ['Fornecedores', 'records:suppliers', 'people'], ['Nova receita', 'recipes', 'recipe']], 'records') +
       navGroup('Ferramentas', 'tools', [['Preços e compras', 'tools:compare', 'price'], ['Produção possível', 'tools:capacity', 'capacity']], 'tools') +
       navGroup('Configurações', 'settings', [['Visão geral', 'settings:home', 'settings'], ['Nuvem e sincronização', 'settings:cloud', 'cloud'], ['Logo do app', 'settings:appearance', 'image'], ['Mensagem e Pix', 'settings:message', 'message'], ['Cardápio do cliente', 'settings:catalog', 'cart'], ['Frete e entrega', 'settings:delivery', 'delivery'], ['Backup', 'settings:backup', 'backup']], 'settings') +
-      '</nav></aside><main class="screen-' + esc(state.screen) + '">' + inAppBackButton() + screen() + '</main>' + noticesPanel() + infoPanel() + '</div><div id="toast" role="status" aria-live="polite"></div>';
+      '</nav></aside><main class="screen-' + esc(state.screen) + '">' + inAppBackButton() + screen() + '</main><footer class="app-credit" aria-label="Créditos">Powered by Jhonathan</footer>' + noticesPanel() + infoPanel() + '</div><div id="toast" role="status" aria-live="polite"></div>';
   }
   function heading(kicker, title, description) {
     return '<div class="screen-heading"><p>' + esc(kicker) + '</p><h1>' + esc(title) + '</h1><span>' + esc(description) + '</span></div>';
@@ -2342,7 +2359,7 @@
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=60';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=62';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -2351,7 +2368,7 @@
   }
   function managementCatalogLink() {
     const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    return base + 'customer.html?v=60&gestao=1';
+    return base + 'customer.html?v=62&gestao=1';
   }
   function noticesPanel() {
     if (!state.notices) return '';
@@ -4227,22 +4244,5 @@
   window.addEventListener('online', () => {
     if (cloudRevision === null || cloudDirty) retryCloudSave();
     else refreshFromCloud(true);
-  });
-  if ('serviceWorker' in navigator) window.addEventListener('load', () => {
-    const updateButton = $('#appUpdate');
-    const showUpdate = () => { if (updateButton) updateButton.hidden = false; };
-    updateButton?.addEventListener('click', () => location.reload());
-    navigator.serviceWorker.register('./service-worker.js?v=60').then(registration => {
-      // Solicita a checagem mesmo em quem abre o atalho instalado há semanas.
-      registration.update().catch(() => {});
-      if (registration.waiting) showUpdate();
-      registration.addEventListener('updatefound', () => {
-        const worker = registration.installing;
-        worker?.addEventListener('statechange', () => {
-          if (worker.state === 'installed' && navigator.serviceWorker.controller) showUpdate();
-        });
-      });
-      navigator.serviceWorker.addEventListener('controllerchange', showUpdate);
-    }).catch(() => {});
   });
 })();

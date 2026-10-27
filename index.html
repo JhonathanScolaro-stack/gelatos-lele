@@ -13,30 +13,41 @@
   <link rel="stylesheet" href="styles-v59.css?v=59">
   <link rel="stylesheet" href="styles-v60.css?v=60">
   <link rel="stylesheet" href="styles-v61.css?v=61">
+  <link rel="stylesheet" href="styles-v62.css?v=62">
+  <!-- UIcons oficiais da Flaticon. Os SVGs próprios seguem como reserva no
+       modo offline, para o PWA não perder ícones sem internet. -->
+  <link rel="stylesheet" href="https://media.flaticon.com/dist/css/fi-uIcons.1610ac96d7802fe35fea.css">
   <title>Gelatos Lele — Gestão</title>
 </head>
 <body>
   <div id="app"></div>
-  <button id="appUpdate" type="button" hidden>Atualização pronta — tocar para abrir</button>
   <script>
-    // A área de gestão atualiza o cache mesmo quando o celular vinha usando
-    // uma versão antiga instalada do app.
+    // Um único registro controla as atualizações. Antes, o HTML registrava a
+    // versão nova e o JavaScript registrava uma versão antiga, fazendo o PWA
+    // alternar de worker e aparentar uma atualização a cada abertura.
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('./service-worker.js?v=61').then(function (registration) {
-          registration.update();
+        navigator.serviceWorker.register('./service-worker.js?v=62').then(function (registration) {
+          registration.update().catch(function () {});
           navigator.serviceWorker.addEventListener('controllerchange', function () {
-            if (sessionStorage.getItem('gelatos-app-reloaded-v61')) return;
-            sessionStorage.setItem('gelatos-app-reloaded-v61', '1');
+            if (sessionStorage.getItem('gelatos-app-reloaded-v62')) return;
+            sessionStorage.setItem('gelatos-app-reloaded-v62', '1');
             window.location.reload();
           }, { once: true });
         }).catch(function () {});
       });
     }
+    // Quando a fonte UIcons estiver disponível, o app usa os ícones oficiais.
+    // Sem conexão, os vetores locais continuam aparecendo normalmente.
+    if (document.fonts && document.fonts.load) {
+      document.fonts.load('1em "uicons-solid-rounded"').then(function () {
+        document.documentElement.classList.add('uicons-loaded');
+      }).catch(function () {});
+    }
   </script>
-  <script src="business-core.js?v=61"></script>
-  <script src="cloud-config.js?v=61"></script>
-  <script src="cloud-sync.js?v=61"></script>
-  <script src="app-v18.js?v=61"></script>
+  <script src="business-core.js?v=62"></script>
+  <script src="cloud-config.js?v=62"></script>
+  <script src="cloud-sync.js?v=62"></script>
+  <script src="app-v18.js?v=62"></script>
 </body>
 </html>
