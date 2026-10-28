@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v67-brand-footer';
+const CACHE = 'gelatos-lele-company-v68-push';
 const ASSETS = [
   './',
   './index.html',
@@ -22,6 +22,7 @@ const ASSETS = [
   './manifest.webmanifest',
   './service-worker.js',
   './logo-transparente-v2.png',
+  './icon-logo-sistema-v68.png',
   './icon-oficial-v2.png',
   './customer.html',
   './customer.css',
@@ -71,4 +72,21 @@ self.addEventListener('fetch', event => {
     caches.open(CACHE).then(cache => cache.put(event.request, copy));
     return response;
   }).catch(() => caches.match(event.request, { ignoreSearch: true }))));
+});
+self.addEventListener('push', event => {
+  let payload = {};
+  try { payload = event.data ? event.data.json() : {}; } catch (_) { payload = { body: event.data?.text?.() || '' }; }
+  event.waitUntil(self.registration.showNotification(payload.title || 'Novo pedido no Gelatos Lele', {
+    body: payload.body || 'Abra o app para conferir o pedido.', icon: './icon-logo-sistema-v68.png', badge: './icon-logo-sistema-v68.png',
+    tag: payload.tag || 'gelatos-pedido', renotify: true, vibrate: [120, 70, 120], data: { url: String(payload.url || './?abrir=pedidos') }
+  }));
+});
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const target = new URL(event.notification.data?.url || './?abrir=pedidos', self.location.origin).href;
+  event.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windows => {
+    const existing = windows.find(client => client.url.startsWith(self.location.origin));
+    if (existing) return existing.focus().then(() => existing.navigate(target));
+    return clients.openWindow(target);
+  }));
 });

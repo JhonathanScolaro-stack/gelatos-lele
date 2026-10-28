@@ -1064,7 +1064,7 @@
       navGroup('Relatórios', 'reports', [['Pedidos', 'reports:orders', 'orders'], ['Financeiro', 'reports:finance', 'finance'], ['Estoque', 'reports:stock', 'stock']], 'report') +
       navGroup('Cadastros', 'records', [['Cadastrar compra', 'stock:purchase', 'cart'], ['Cardápio / sabores', 'records:catalog', 'tag'], ['Categorias de geladinhos', 'records:categories', 'records'], ['Ingredientes', 'stock:ingredient', 'recipe'], ['Insumos', 'stock:supply', 'stock'], ['Fornecedores', 'records:suppliers', 'people'], ['Nova receita', 'recipes', 'recipe']], 'records') +
       navGroup('Ferramentas', 'tools', [['Preços e compras', 'tools:compare', 'price'], ['Produção possível', 'tools:capacity', 'capacity']], 'tools') +
-      navGroup('Configurações', 'settings', [['Visão geral', 'settings:home', 'settings'], ['Nuvem e sincronização', 'settings:cloud', 'cloud'], ['Logo do app', 'settings:appearance', 'image'], ['Mensagem e Pix', 'settings:message', 'message'], ['Cardápio do cliente', 'settings:catalog', 'cart'], ['Frete e entrega', 'settings:delivery', 'delivery'], ['Backup', 'settings:backup', 'backup']], 'settings') +
+      navGroup('Configurações', 'settings', [['Visão geral', 'settings:home', 'settings'], ['Nuvem e sincronização', 'settings:cloud', 'cloud'], ['Notificações de pedidos', 'settings:notifications', 'bell'], ['Logo do app', 'settings:appearance', 'image'], ['Mensagem e Pix', 'settings:message', 'message'], ['Cardápio do cliente', 'settings:catalog', 'cart'], ['Frete e entrega', 'settings:delivery', 'delivery'], ['Backup', 'settings:backup', 'backup']], 'settings') +
       '</nav></aside><main class="screen-' + esc(state.screen) + '">' + inAppBackButton() + screen() + '</main>' + poweredFooter() + noticesPanel() + infoPanel() + '</div><div id="toast" role="status" aria-live="polite"></div>';
   }
   function heading(kicker, title, description) {
@@ -2259,6 +2259,12 @@
         : '<section class="panel caution"><b>Não foi possível confirmar a empresa agora.</b><p>Você pode consultar a cópia deste celular, mas só movimente estoque quando a conexão voltar e o status ficar sincronizado.</p><div class="button-row"><button class="secondary" data-action="cloud-refresh">Tentar novamente</button><button class="outline" data-action="cloud-signout">Sair deste celular</button></div></section>';
       return '<section class="screen active">' + heading('Configurações', 'Nuvem e sincronização', synced ? 'Sua empresa está sincronizada. Alterações feitas em um celular aparecem no outro.' : cloudDirty ? 'Há uma alteração guardada neste celular aguardando confirmação da nuvem.' : 'Confira a conexão antes de movimentar estoque em mais de um celular.') + '<section class="panel"><h2>Acesso conectado</h2><p>' + esc(window.GelatosCloud.email() || 'E-mail conectado') + '</p><span class="badge ' + (synced ? 'paid' : 'pending') + '">' + (synced ? 'sincronizado' : cloudDirty ? 'aguardando envio' : 'verificar conexão') + '</span>' + cloudStatus + '</section>' + cloudHelp + '</section>';
     }
+    if (section === 'notifications') {
+      const supported = typeof Notification !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window;
+      const permission = typeof Notification === 'undefined' ? 'indisponível' : Notification.permission;
+      const status = !supported ? '<p class="form-note">Este navegador não oferece notificações push. Abra o aplicativo instalado pelo Chrome neste celular.</p>' : permission === 'denied' ? '<p class="form-note">As notificações foram bloqueadas pelo celular. Abra as permissões do app no Android e permita notificações.</p>' : '<p class="form-note">Ative somente no celular que deve receber o aviso de novo pedido. Pedidos continuam sendo salvos mesmo se a notificação não puder ser entregue.</p>';
+      return '<section class="screen active">' + heading('Configurações', 'Notificações de pedidos', 'Receba um alerta com vibração quando um cliente concluir um pedido pelo cardápio.') + '<section class="panel"><h2>Celular que recebe os alertas</h2>' + status + '<dl><dt>Permissão neste celular</dt><dd>' + esc(permission) + '</dd><dt>Como funciona</dt><dd>Pedido do cardápio → notificação → abre Controle de pedidos</dd></dl><div class="button-row"><button class="primary" data-action="enable-push-notifications"' + (supported && permission !== 'denied' ? '' : ' disabled') + '>Ativar neste celular</button><button class="outline" data-action="disable-push-notifications"' + (supported ? '' : ' disabled') + '>Desativar neste celular</button></div><p class="form-note">Depois de ativar, confirme que o Android permite som para o app Gelatos Lele. O sistema não envia alerta para pedidos criados manualmente por vocês.</p></section></section>';
+    }
     if (section === 'team') {
       const members = Array.isArray(state.teamMembers) ? state.teamMembers : [];
       const list = members.length
@@ -2355,7 +2361,7 @@
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=67';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=68';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -2364,7 +2370,7 @@
   }
   function managementCatalogLink() {
     const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    return base + 'customer.html?v=67&gestao=1';
+    return base + 'customer.html?v=68&gestao=1';
   }
   function noticesPanel() {
     if (!state.notices) return '';
@@ -3894,6 +3900,39 @@
     downloadBlob(zip([{ name: '[Content_Types].xml', body: types }, { name: '_rels/.rels', body: rels }, { name: 'xl/workbook.xml', body: workbook }, { name: 'xl/_rels/workbook.xml.rels', body: workbookRels }, { name: 'xl/worksheets/sheet1.xml', body: sheet }]), 'relatorio-gelatos-lele-' + kind + '-' + today() + '.xlsx');
     toast('Relatório Excel baixado.');
   }
+  function base64UrlToBytes(value) {
+    const padded = String(value || '').replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - String(value || '').length % 4) % 4);
+    const raw = atob(padded);
+    return Uint8Array.from(raw, char => char.charCodeAt(0));
+  }
+  async function enablePushNotifications() {
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window) || typeof Notification === 'undefined') throw new Error('Abra o aplicativo instalado pelo Chrome neste celular para receber notificações.');
+      if (!window.GelatosCloud?.hasSession?.()) throw new Error('Entre na nuvem antes de ativar as notificações.');
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') throw new Error('A permissão de notificações não foi concedida neste celular.');
+      const config = await window.GelatosCloud.getPushConfig();
+      if (!config?.enabled || !config?.publicKey) throw new Error('As notificações ainda estão sendo preparadas na nuvem. Tente novamente em alguns minutos.');
+      const registration = await navigator.serviceWorker.ready;
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToBytes(config.publicKey) });
+      await window.GelatosCloud.subscribePush(subscription.toJSON());
+      toast('Notificações ativadas neste celular.');
+      render({ preserveScroll: true });
+    } catch (error) { toast(error.message || 'Não foi possível ativar as notificações.'); }
+  }
+  async function disablePushNotifications() {
+    try {
+      const registration = await navigator.serviceWorker?.ready;
+      const subscription = await registration?.pushManager?.getSubscription();
+      if (subscription) {
+        await window.GelatosCloud?.unsubscribePush?.(subscription.endpoint);
+        await subscription.unsubscribe();
+      }
+      toast('Notificações desativadas neste celular.');
+      render({ preserveScroll: true });
+    } catch (error) { toast(error.message || 'Não foi possível desativar as notificações.'); }
+  }
   document.addEventListener('click', event => {
     const route = event.target.closest('[data-route]');
     if (route) {
@@ -3926,6 +3965,8 @@
     if (action === 'cloud-auth-signin') { state.cloudAuthView = 'signin'; state.cloudAuthError = ''; render({ preserveScroll: true }); return; }
     if (action === 'cloud-auth-migration') { state.cloudAuthView = 'migration'; state.cloudAuthError = ''; render({ preserveScroll: true }); return; }
     if (action === 'cloud-auth-change-password') { state.cloudAuthView = 'update-password'; state.cloudAuthError = ''; render({ preserveScroll: true }); return; }
+    if (action === 'enable-push-notifications') { enablePushNotifications(); return; }
+    if (action === 'disable-push-notifications') { disablePushNotifications(); return; }
     if (action === 'open-notices') { state.notices = true; render(); return; }
     if (action === 'close-notices') { state.notices = false; render(); return; }
     if (action === 'read-notices') { visibleNotifications().forEach(item => item.read = true); save(); render(); return; }

@@ -19,10 +19,16 @@
  * é uma única atualização condicional no D1.
  */
 
+// O Quick Edit da Cloudflare instala este pacote durante a publicação.
+// Assim o Worker continua em um único módulo, sem depender de arquivos locais.
+import { sendPushBatch, isPushServiceEndpoint } from 'npm:@mmmike/web-push@1.5.0';
+
 const MAX_IMAGE_BYTES = 1_200_000;
 const MAX_STATE_PART_BYTES = 1_750_000;
 const SESSION_DAYS = 30;
-const PBKDF2_ROUNDS = 160_000;
+// O Web Crypto do Cloudflare Workers aceita no máximo 100 mil iterações.
+// Mantemos o teto para que login e migração funcionem também no celular.
+const PBKDF2_ROUNDS = 100_000;
 const STATE_PARTS = [
   'version', 'supplies', 'recipes', 'productions', 'readyStock', 'orders',
   'expenses', 'suppliers', 'purchases', 'resellers', 'productCategories',
@@ -312,6 +318,33 @@ function paymentFee(total, method, settings) {
   return round(numberOf(total) * Math.max(0, rate) / 100);
 }
 function isDelivery(mode) { return /entrega/i.test(String(mode || '')); }
+function pushConfiguration(env) {
+  const publicKey = asText(env.VAPID_PUBLIC_KEY);
+  const privateKey = asText(env.VAPID_PRIVATE_KEY);
+  if (!publicKey || !privateKey) return null;
+  return { publicKey, privateKey, subject: asText(env.VAPID_SUBJECT) || 'mailto:gelatoslele@gmail.com' };
+}
+async function notifyNewCustomerOrder(env, slug, order) {
+  const vapid = pushConfiguration(env);
+  if (!vapid) return;
+  const rows = await env.DB.prepare('SELECT endpoint, subscription_json FROM gelatos_push_subscriptions WHERE store_slug = ? AND enabled = 1').bind(slug).all();
+  const subscriptions = [];
+  for (const row of rows.results || []) {
+    try {
+      const subscription = JSON.parse(String(row.subscription_json || ''));
+      if (subscription?.endpoint === row.endpoint && isPushServiceEndpoint(subscription.endpoint)) subscriptions.push(subscription);
+    } catch (_) { /* Uma inscrição inválida nunca impede um pedido. */ }
+  }
+  if (!subscriptions.length) return;
+  const result = await sendPushBatch(subscriptions, {
+    title: 'Novo pedido: ' + String(order.customer || 'cliente'),
+    body: 'Pedido de ' + String(order.items || []).reduce((sum, item) => sum + quantity(item.quantity), 0) + ' geladinho(s) · R$ ' + numberOf(order.total).toFixed(2).replace('.', ','),
+    url: 'https://jhonathanscolaro-stack.github.io/gelatos-lele/?abrir=pedidos',
+    tag: 'pedido-' + String(order.id || '')
+  }, vapid, { ttl: 3600, urgency: 'high', topic: 'gelatos-order' });
+  if (result.gone.length) await env.DB.batch(result.gone.map(endpoint => env.DB.prepare('DELETE FROM gelatos_push_subscriptions WHERE store_slug = ? AND endpoint = ?').bind(slug, endpoint)));
+  if (result.delivered) await env.DB.prepare('UPDATE gelatos_push_subscriptions SET last_success_at = ?, updated_at = ? WHERE store_slug = ? AND enabled = 1').bind(now(), now(), slug).run();
+}
 function makeOrder(state, payload) {
   const requestId = asText(payload.requestId);
   const clientId = asText(payload.clientId);
@@ -556,9 +589,38 @@ async function route(request, env) {
       try { order = makeOrder(state, body); }
       catch (cause) { return error(cause.message || 'Não foi possível confirmar o pedido.', 400, request, env); }
       const committed = await commitState(env, slug, loaded.meta.revision, state, loaded.meta);
-      if (!committed.conflict) return json(order, 201, request, env);
+      if (!committed.conflict) {
+        // O pedido já está salvo antes de avisar o celular. Uma falha no
+        // serviço de push nunca pode recusar uma compra do cliente.
+        try { await notifyNewCustomerOrder(env, slug, order); } catch (_) {}
+        return json(order, 201, request, env);
+      }
     }
     return error('O estoque foi atualizado por outro pedido. Atualize o cardápio e tente novamente.', 409, request, env, 'CONFLITO');
+  }
+
+  if (request.method === 'GET' && path === '/v1/push/config') {
+    await requireMember(request, env, false);
+    const config = pushConfiguration(env);
+    return json({ enabled: Boolean(config), publicKey: config?.publicKey || '' }, 200, request, env);
+  }
+  if (request.method === 'POST' && path === '/v1/push/subscriptions') {
+    const member = await requireMember(request, env, false);
+    const body = await parseBody(request);
+    const subscription = body?.subscription;
+    if (!pushConfiguration(env)) return error('As notificações ainda não foram configuradas na nuvem.', 503, request, env, 'PUSH_NAO_CONFIGURADO');
+    if (!subscription || !isPushServiceEndpoint(subscription.endpoint) || typeof subscription?.keys?.p256dh !== 'string' || typeof subscription?.keys?.auth !== 'string') return error('Inscrição de notificação inválida.', 400, request, env);
+    const stamp = now();
+    await env.DB.prepare('INSERT INTO gelatos_push_subscriptions (subscription_id, store_slug, member_id, endpoint, subscription_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?) ON CONFLICT(store_slug, endpoint) DO UPDATE SET member_id = excluded.member_id, subscription_json = excluded.subscription_json, enabled = 1, updated_at = excluded.updated_at').bind(randomId('push'), slug, member.member_id, subscription.endpoint, JSON.stringify(subscription), stamp, stamp).run();
+    return json({ ok: true }, 201, request, env);
+  }
+  if (request.method === 'DELETE' && path === '/v1/push/subscriptions') {
+    const member = await requireMember(request, env, false);
+    const body = await parseBody(request);
+    const endpoint = asText(body?.endpoint);
+    if (!isPushServiceEndpoint(endpoint)) return error('Inscrição de notificação inválida.', 400, request, env);
+    await env.DB.prepare('DELETE FROM gelatos_push_subscriptions WHERE store_slug = ? AND member_id = ? AND endpoint = ?').bind(slug, member.member_id, endpoint).run();
+    return json({ ok: true }, 200, request, env);
   }
 
   if (request.method === 'GET' && path === '/v1/team') {

@@ -6,14 +6,14 @@
   <meta name="theme-color" content="#d85e78">
   <meta name="description" content="Gestão de receitas, estoque, pedidos, financeiro e relatórios da Gelatos Lele.">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="apple-touch-icon" href="icon-oficial-v2.png">
+  <link rel="apple-touch-icon" href="icon-logo-sistema-v68.png">
   <link rel="stylesheet" href="styles-v18.css?v=59">
   <link rel="stylesheet" href="styles-v32.css?v=59">
   <link rel="stylesheet" href="styles-v51.css?v=59">
   <link rel="stylesheet" href="styles-v59.css?v=59">
   <link rel="stylesheet" href="styles-v60.css?v=60">
   <link rel="stylesheet" href="styles-v61.css?v=61">
-  <link rel="stylesheet" href="styles-v67.css?v=67">
+  <link rel="stylesheet" href="styles-v67.css?v=68">
   <title>Gelatos Lele — Gestão</title>
 </head>
 <body>
@@ -24,11 +24,11 @@
     // alternar de worker e aparentar uma atualização a cada abertura.
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('./service-worker.js?v=67').then(function (registration) {
+        navigator.serviceWorker.register('./service-worker.js?v=68').then(function (registration) {
           registration.update().catch(function () {});
           navigator.serviceWorker.addEventListener('controllerchange', function () {
-            if (sessionStorage.getItem('gelatos-app-reloaded-v67')) return;
-            sessionStorage.setItem('gelatos-app-reloaded-v67', '1');
+            if (sessionStorage.getItem('gelatos-app-reloaded-v68')) return;
+            sessionStorage.setItem('gelatos-app-reloaded-v68', '1');
             window.location.reload();
           }, { once: true });
         }).catch(function () {});
@@ -38,6 +38,6 @@
   <script src="business-core.js?v=62"></script>
   <script src="cloud-config.js?v=62"></script>
   <script src="cloud-sync.js?v=62"></script>
-  <script src="app-v18.js?v=67"></script>
+  <script src="app-v18.js?v=68"></script>
 </body>
 </html>
