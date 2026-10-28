@@ -3940,8 +3940,22 @@
   async function testPushNotifications() {
     try {
       if (!window.GelatosCloud?.hasSession?.()) throw new Error('Entre na nuvem antes de testar as notificações.');
+      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') throw new Error('Permita as notificações neste celular antes de fazer o teste.');
+      // Exibe primeiro um aviso gerado no próprio aparelho. Isso separa uma
+      // permissão bloqueada pelo Android de uma falha na entrega pela nuvem.
+      const registration = await navigator.serviceWorker?.ready;
+      if (!registration) throw new Error('O aplicativo ainda está sendo preparado. Feche e abra novamente antes de testar.');
+      await registration.showNotification('Teste local — Gelatos Lele', {
+        body: 'Se este aviso apareceu, o celular está pronto para receber pedidos.',
+        icon: './icon-logo-sistema-v68.png',
+        badge: './icon-logo-sistema-v68.png',
+        tag: 'gelatos-teste-local-' + Date.now(),
+        renotify: true,
+        vibrate: [180, 90, 180],
+        data: { url: './?abrir=pedidos' }
+      });
       const result = await window.GelatosCloud.testPush();
-      toast(result?.delivered ? 'Aviso de teste enviado. Confira a notificação do celular.' : 'Não foi possível entregar o aviso de teste.');
+      toast(result?.delivered ? 'Teste enviado. Confira também “Teste via nuvem” nas notificações.' : 'Não foi possível entregar o aviso de teste.');
     } catch (error) { toast(error.message || 'Não foi possível testar as notificações.'); }
   }
   document.addEventListener('click', event => {
