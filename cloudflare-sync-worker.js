@@ -324,6 +324,9 @@ function pushConfiguration(env) {
   if (!publicKey || !privateKey) return null;
   return { publicKey, privateKey, subject: asText(env.VAPID_SUBJECT) || 'mailto:gelatoslele@gmail.com' };
 }
+function pushReceiptUrl(token, kind) {
+  return 'https://gelatos-lele-sync.scolarojhonathan.workers.dev/v1/push/receipt?token=' + encodeURIComponent(token) + '&kind=' + encodeURIComponent(kind);
+}
 async function notifyNewCustomerOrder(env, slug, order) {
   const vapid = pushConfiguration(env);
   if (!vapid) return;
@@ -336,18 +339,20 @@ async function notifyNewCustomerOrder(env, slug, order) {
     } catch (_) { /* Uma inscrição inválida nunca impede um pedido. */ }
   }
   if (!subscriptions.length) return;
+  const receiptToken = randomId('order-push');
   const result = await sendPushBatch(subscriptions, {
     // Mantemos o mesmo envelope que o aviso de teste, pois é o formato já
     // confirmado no Android da empresa. Os detalhes continuam no corpo.
     title: 'Novo pedido no Gelatos Lele',
     body: String(order.customer || 'Cliente') + ' fez um pedido de ' + (order.items || []).reduce((sum, item) => sum + quantity(item.quantity), 0) + ' geladinho(s) · R$ ' + numberOf(order.total).toFixed(2).replace('.', ','),
     url: 'https://jhonathanscolaro-stack.github.io/gelatos-lele/?abrir=pedidos',
-    tag: 'gelatos-pedido'
+    tag: 'gelatos-pedido',
+    receiptUrl: pushReceiptUrl(receiptToken, 'order')
   }, vapid, { ttl: 300, urgency: 'high', topic: 'gelatos-order' });
   if (result.gone.length) await env.DB.batch(result.gone.map(endpoint => env.DB.prepare('DELETE FROM gelatos_push_subscriptions WHERE store_slug = ? AND endpoint = ?').bind(slug, endpoint)));
   if (result.delivered) await env.DB.prepare('UPDATE gelatos_push_subscriptions SET last_success_at = ?, updated_at = ? WHERE store_slug = ? AND enabled = 1').bind(now(), now(), slug).run();
   if (result.failed.length) console.error('Falha ao avisar novo pedido', result.failed.map(item => String(item.error?.message || item.error)).join(' | '));
-  console.log('Aviso de novo pedido', JSON.stringify({ orderId: order.id, subscriptions: subscriptions.length, delivered: result.delivered, failed: result.failed.length, gone: result.gone.length }));
+  console.log('Aviso de novo pedido', JSON.stringify({ orderId: order.id, receiptToken, subscriptions: subscriptions.length, delivered: result.delivered, failed: result.failed.length, gone: result.gone.length }));
   return result;
 }
 function makeOrder(state, payload) {
@@ -486,6 +491,15 @@ async function route(request, env) {
   const path = url.pathname.replace(/\/$/, '') || '/';
   const slug = storeSlug(env);
   if (request.method === 'OPTIONS') return reply('', 204, request, env);
+
+  // Confirmação sem dados pessoais: usada somente para diagnosticar se o
+  // Android recebeu o Web Push antes de mostrar a notificação.
+  if (request.method === 'POST' && path === '/v1/push/receipt') {
+    const token = asText(url.searchParams.get('token'));
+    const kind = asText(url.searchParams.get('kind'));
+    if (/^(order-push|test-push)-[a-f0-9]{24}$/.test(token) && /^(order|test)$/.test(kind)) console.log('Push recebido no aparelho', JSON.stringify({ token, kind }));
+    return json({ ok: true }, 200, request, env);
+  }
 
   if (request.method === 'GET' && path === '/health') return json({ ok: true, service: 'gelatos-lele-cloudflare', time: now() }, 200, request, env);
 
@@ -639,7 +653,9 @@ async function route(request, env) {
       } catch (_) { return []; }
     });
     if (!subscriptions.length) return error('Este celular ainda não está ativado para receber notificações.', 400, request, env, 'PUSH_NAO_ATIVADO');
-    const result = await sendPushBatch(subscriptions, { title: 'Teste de notificação', body: 'Tudo certo: este celular receberá os próximos pedidos.', url: 'https://jhonathanscolaro-stack.github.io/gelatos-lele/?abrir=pedidos', tag: 'gelatos-teste' }, vapid, { ttl: 300, urgency: 'high', topic: 'gelatos-test' });
+    const receiptToken = randomId('test-push');
+    const result = await sendPushBatch(subscriptions, { title: 'Teste de notificação', body: 'Tudo certo: este celular receberá os próximos pedidos.', url: 'https://jhonathanscolaro-stack.github.io/gelatos-lele/?abrir=pedidos', tag: 'gelatos-teste', receiptUrl: pushReceiptUrl(receiptToken, 'test') }, vapid, { ttl: 300, urgency: 'high', topic: 'gelatos-test' });
+    console.log('Teste de push enviado', JSON.stringify({ receiptToken, subscriptions: subscriptions.length, delivered: result.delivered, failed: result.failed.length, gone: result.gone.length }));
     if (result.gone.length) await env.DB.batch(result.gone.map(endpoint => env.DB.prepare('DELETE FROM gelatos_push_subscriptions WHERE store_slug = ? AND endpoint = ?').bind(slug, endpoint)));
     if (result.delivered) await env.DB.prepare('UPDATE gelatos_push_subscriptions SET last_success_at = ?, updated_at = ? WHERE store_slug = ? AND member_id = ? AND enabled = 1').bind(now(), now(), slug, member.member_id).run();
     if (!result.delivered) return error('O celular não aceitou o teste de notificação. Verifique as permissões do Android.', 502, request, env, 'PUSH_NAO_ENTREGUE');

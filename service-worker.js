@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v74-push';
+const CACHE = 'gelatos-lele-company-v75-push';
 const ASSETS = [
   './',
   './index.html',
@@ -76,10 +76,11 @@ self.addEventListener('fetch', event => {
 self.addEventListener('push', event => {
   let payload = {};
   try { payload = event.data ? event.data.json() : {}; } catch (_) { payload = { body: event.data?.text?.() || '' }; }
-  event.waitUntil(self.registration.showNotification(payload.title || 'Novo pedido no Gelatos Lele', {
+  const receipt = payload.receiptUrl ? fetch(String(payload.receiptUrl), { method: 'POST', body: '{}' }).catch(() => undefined) : Promise.resolve();
+  event.waitUntil(Promise.all([self.registration.showNotification(payload.title || 'Novo pedido no Gelatos Lele', {
     body: payload.body || 'Abra o app para conferir o pedido.', icon: './icon-logo-sistema-v68.png', badge: './icon-logo-sistema-v68.png',
     tag: payload.tag || 'gelatos-pedido', renotify: true, vibrate: [120, 70, 120], data: { url: String(payload.url || './?abrir=pedidos') }
-  }));
+  }), receipt]));
 });
 self.addEventListener('notificationclick', event => {
   event.notification.close();
