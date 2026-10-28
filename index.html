@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="styles-v59.css?v=59">
   <link rel="stylesheet" href="styles-v60.css?v=60">
   <link rel="stylesheet" href="styles-v61.css?v=61">
-  <link rel="stylesheet" href="styles-v67.css?v=69">
+  <link rel="stylesheet" href="styles-v67.css?v=70">
   <title>Gelatos Lele — Gestão</title>
 </head>
 <body>
@@ -24,11 +24,11 @@
     // alternar de worker e aparentar uma atualização a cada abertura.
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('./service-worker.js?v=69').then(function (registration) {
+        navigator.serviceWorker.register('./service-worker.js?v=70').then(function (registration) {
           registration.update().catch(function () {});
           navigator.serviceWorker.addEventListener('controllerchange', function () {
-            if (sessionStorage.getItem('gelatos-app-reloaded-v69')) return;
-            sessionStorage.setItem('gelatos-app-reloaded-v69', '1');
+            if (sessionStorage.getItem('gelatos-app-reloaded-v70')) return;
+            sessionStorage.setItem('gelatos-app-reloaded-v70', '1');
             window.location.reload();
           }, { once: true });
         }).catch(function () {});
@@ -37,7 +37,7 @@
   </script>
   <script src="business-core.js?v=62"></script>
   <script src="cloud-config.js?v=62"></script>
-  <script src="cloud-sync.js?v=69"></script>
-  <script src="app-v18.js?v=69"></script>
+  <script src="cloud-sync.js?v=70"></script>
+  <script src="app-v18.js?v=70"></script>
 </body>
 </html>

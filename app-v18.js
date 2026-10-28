@@ -373,7 +373,7 @@
       'category-edit': 'records-categories'
     };
     const screen = fallback[String(value || '')] || String(value || '');
-    return /^(home|orders-(new|history|calendar)|stock-(purchase|ingredient|supply|ready)|recipes|production|finance-(overview|receivable|payable|opening|opening-receive|opening-pay)|reports-(orders|finance|stock)|records-(catalog|suppliers|categories)|resale-(dashboard|new|history|people)|tools-(compare|capacity)|settings-(home|cloud|team|appearance|message|catalog|delivery|backup|restore-preview))$/.test(screen) ? screen : 'home';
+    return /^(home|orders-(new|history|calendar)|stock-(purchase|ingredient|supply|ready)|recipes|production|finance-(overview|receivable|payable|opening|opening-receive|opening-pay)|reports-(orders|finance|stock)|records-(catalog|suppliers|categories)|resale-(dashboard|new|history|people)|tools-(compare|capacity)|settings-(home|cloud|team|notifications|appearance|message|catalog|delivery|backup|restore-preview))$/.test(screen) ? screen : 'home';
   }
   function loadLastScreen() {
     try { return resumableScreen(localStorage.getItem(LAST_SCREEN_KEY)); }
@@ -457,6 +457,9 @@
     state.screen = 'settings-cloud';
     state.cloudAuthView = 'update-password';
   } else if (window.GelatosCloud && !window.GelatosCloud.hasSession()) state.screen = 'settings-cloud';
+  // A notificação pode abrir o PWA fechado. Nesse caso, levamos direto ao
+  // histórico de pedidos em vez de deixar a pessoa na tela inicial.
+  else if (new URLSearchParams(window.location.search).get('abrir') === 'pedidos') state.screen = 'orders-history';
   function saveLocal() {
     try { localStorage.setItem(STORE, JSON.stringify(data)); return true; }
     catch (_) { return false; }

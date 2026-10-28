@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v69-push';
+const CACHE = 'gelatos-lele-company-v70-push';
 const ASSETS = [
   './',
   './index.html',
