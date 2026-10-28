@@ -5,7 +5,10 @@ on:
     branches: [main]
     paths:
       - 'cloudflare-sync-worker.js'
-      - 'vendor/web-push/**'
+      - 'send.mjs'
+      - 'vapid.mjs'
+      - 'encrypt.mjs'
+      - 'errors.mjs'
       - 'wrangler.toml'
       - '.github/workflows/deploy-cloudflare-worker.yml'
   workflow_dispatch:
@@ -24,4 +27,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
-          command: deploy
+          # Mantém segredos cadastrados diretamente na Cloudflare (VAPID,
+          # bootstrap etc.) em cada publicação. Sem isto, um deploy pode
+          # apagar a configuração de notificações já ativa.
+          command: deploy --keep-vars
