@@ -344,6 +344,9 @@ async function notifyNewCustomerOrder(env, slug, order) {
   }, vapid, { ttl: 3600, urgency: 'high', topic: 'gelatos-order' });
   if (result.gone.length) await env.DB.batch(result.gone.map(endpoint => env.DB.prepare('DELETE FROM gelatos_push_subscriptions WHERE store_slug = ? AND endpoint = ?').bind(slug, endpoint)));
   if (result.delivered) await env.DB.prepare('UPDATE gelatos_push_subscriptions SET last_success_at = ?, updated_at = ? WHERE store_slug = ? AND enabled = 1').bind(now(), now(), slug).run();
+  if (result.failed.length) console.error('Falha ao avisar novo pedido', result.failed.map(item => String(item.error?.message || item.error)).join(' | '));
+  console.log('Aviso de novo pedido', JSON.stringify({ orderId: order.id, subscriptions: subscriptions.length, delivered: result.delivered, failed: result.failed.length, gone: result.gone.length }));
+  return result;
 }
 function makeOrder(state, payload) {
   const requestId = asText(payload.requestId);
@@ -583,7 +586,14 @@ async function route(request, env) {
       const loaded = await latestStateWithExpiredReservations(env, slug);
       if (!loaded) return error('Cardápio não encontrado.', 404, request, env);
       const existing = findOrderByRequest(loaded.state, body.requestId);
-      if (existing) return json(existing, 200, request, env);
+      if (existing) {
+        // Caso a confirmação anterior tenha sido interrompida antes do aviso
+        // (por exemplo, uma versão antiga do serviço), uma nova tentativa do
+        // mesmo cliente recupera o aviso sem criar nem descontar outro pedido.
+        try { await notifyNewCustomerOrder(env, slug, existing); }
+        catch (cause) { console.error('Falha ao reenviar aviso de pedido existente', String(cause?.message || cause)); }
+        return json(existing, 200, request, env);
+      }
       const state = structuredClone(loaded.state);
       let order;
       try { order = makeOrder(state, body); }
@@ -592,7 +602,8 @@ async function route(request, env) {
       if (!committed.conflict) {
         // O pedido já está salvo antes de avisar o celular. Uma falha no
         // serviço de push nunca pode recusar uma compra do cliente.
-        try { await notifyNewCustomerOrder(env, slug, order); } catch (_) {}
+        try { await notifyNewCustomerOrder(env, slug, order); }
+        catch (cause) { console.error('Falha ao enviar aviso de novo pedido', String(cause?.message || cause)); }
         return json(order, 201, request, env);
       }
     }
