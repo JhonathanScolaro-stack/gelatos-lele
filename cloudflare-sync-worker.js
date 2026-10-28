@@ -337,11 +337,13 @@ async function notifyNewCustomerOrder(env, slug, order) {
   }
   if (!subscriptions.length) return;
   const result = await sendPushBatch(subscriptions, {
-    title: 'Novo pedido: ' + String(order.customer || 'cliente'),
-    body: 'Pedido de ' + (order.items || []).reduce((sum, item) => sum + quantity(item.quantity), 0) + ' geladinho(s) · R$ ' + numberOf(order.total).toFixed(2).replace('.', ','),
+    // Mantemos o mesmo envelope que o aviso de teste, pois é o formato já
+    // confirmado no Android da empresa. Os detalhes continuam no corpo.
+    title: 'Novo pedido no Gelatos Lele',
+    body: String(order.customer || 'Cliente') + ' fez um pedido de ' + (order.items || []).reduce((sum, item) => sum + quantity(item.quantity), 0) + ' geladinho(s) · R$ ' + numberOf(order.total).toFixed(2).replace('.', ','),
     url: 'https://jhonathanscolaro-stack.github.io/gelatos-lele/?abrir=pedidos',
-    tag: 'pedido-' + String(order.id || '')
-  }, vapid, { ttl: 3600, urgency: 'high' });
+    tag: 'gelatos-pedido'
+  }, vapid, { ttl: 300, urgency: 'high', topic: 'gelatos-order' });
   if (result.gone.length) await env.DB.batch(result.gone.map(endpoint => env.DB.prepare('DELETE FROM gelatos_push_subscriptions WHERE store_slug = ? AND endpoint = ?').bind(slug, endpoint)));
   if (result.delivered) await env.DB.prepare('UPDATE gelatos_push_subscriptions SET last_success_at = ?, updated_at = ? WHERE store_slug = ? AND enabled = 1').bind(now(), now(), slug).run();
   if (result.failed.length) console.error('Falha ao avisar novo pedido', result.failed.map(item => String(item.error?.message || item.error)).join(' | '));
