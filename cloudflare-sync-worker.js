@@ -19,9 +19,9 @@
  * é uma única atualização condicional no D1.
  */
 
-// O Quick Edit da Cloudflare instala este pacote durante a publicação.
-// Assim o Worker continua em um único módulo, sem depender de arquivos locais.
-import { sendPushBatch, isPushServiceEndpoint } from 'npm:@mmmike/web-push@1.5.0';
+// Implementação empacotada no repositório. Isto evita depender da resolução
+// de pacotes npm do Wrangler durante a publicação automática.
+import { sendPushBatch, isPushServiceEndpoint } from './send.mjs';
 
 const MAX_IMAGE_BYTES = 1_200_000;
 const MAX_STATE_PART_BYTES = 1_750_000;

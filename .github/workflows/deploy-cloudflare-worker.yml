@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'cloudflare-sync-worker.js'
+      - 'vendor/web-push/**'
       - 'wrangler.toml'
       - '.github/workflows/deploy-cloudflare-worker.yml'
   workflow_dispatch:
