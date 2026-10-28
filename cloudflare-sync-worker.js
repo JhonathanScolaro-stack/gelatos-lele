@@ -338,7 +338,7 @@ async function notifyNewCustomerOrder(env, slug, order) {
   if (!subscriptions.length) return;
   const result = await sendPushBatch(subscriptions, {
     title: 'Novo pedido: ' + String(order.customer || 'cliente'),
-    body: 'Pedido de ' + String(order.items || []).reduce((sum, item) => sum + quantity(item.quantity), 0) + ' geladinho(s) · R$ ' + numberOf(order.total).toFixed(2).replace('.', ','),
+    body: 'Pedido de ' + (order.items || []).reduce((sum, item) => sum + quantity(item.quantity), 0) + ' geladinho(s) · R$ ' + numberOf(order.total).toFixed(2).replace('.', ','),
     url: 'https://jhonathanscolaro-stack.github.io/gelatos-lele/?abrir=pedidos',
     tag: 'pedido-' + String(order.id || '')
   }, vapid, { ttl: 3600, urgency: 'high', topic: 'gelatos-order' });
