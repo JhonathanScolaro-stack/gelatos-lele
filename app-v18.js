@@ -2267,7 +2267,7 @@
       const permission = typeof Notification === 'undefined' ? 'indisponível' : Notification.permission;
       const permissionText = permission === 'granted' ? 'Permitida' : permission === 'denied' ? 'Bloqueada' : permission === 'default' ? 'Ainda não permitida' : permission;
       const status = !supported ? '<p class="form-note">Este navegador não oferece notificações push. Abra o aplicativo instalado pelo Chrome neste celular.</p>' : permission === 'denied' ? '<p class="form-note">As notificações foram bloqueadas pelo celular. Abra as permissões do app no Android e permita notificações.</p>' : '<p class="form-note">Ative somente no celular que deve receber o aviso de novo pedido. Pedidos continuam sendo salvos mesmo se a notificação não puder ser entregue.</p>';
-      return '<section class="screen active">' + heading('Configurações', 'Notificações de pedidos', 'Receba um alerta com vibração quando um cliente concluir um pedido pelo cardápio.') + '<section class="panel"><h2>Celular que recebe os alertas</h2>' + status + '<dl><dt>Permissão neste celular</dt><dd>' + esc(permissionText) + '</dd><dt>Como funciona</dt><dd>Pedido do cardápio → notificação → abre Controle de pedidos</dd></dl><div class="button-row"><button class="primary" data-action="enable-push-notifications"' + (supported && permission !== 'denied' ? '' : ' disabled') + '>Ativar neste celular</button><button class="secondary" data-action="test-push-notifications"' + (supported && permission === 'granted' ? '' : ' disabled') + '>Enviar aviso de teste</button><button class="outline" data-action="disable-push-notifications"' + (supported ? '' : ' disabled') + '>Desativar neste celular</button></div><p class="form-note">O teste confirma o som e a vibração antes de vocês dependerem de um pedido real. O sistema não envia alerta para pedidos criados manualmente por vocês.</p></section></section>';
+      return '<section class="screen active">' + heading('Configurações', 'Notificações de pedidos', 'Receba um alerta com vibração quando um cliente concluir um pedido pelo cardápio.') + '<section class="panel"><h2>Celular que recebe os alertas</h2>' + status + '<dl><dt>Permissão neste celular</dt><dd>' + esc(permissionText) + '</dd><dt>Como funciona</dt><dd>Pedido do cardápio → notificação → abre Controle de pedidos</dd></dl><div class="button-row"><button class="primary" data-action="enable-push-notifications"' + (supported && permission !== 'denied' ? '' : ' disabled') + '>Ativar neste celular</button><button class="secondary" data-action="test-push-notifications"' + (supported && permission === 'granted' ? '' : ' disabled') + '>Testar aviso da nuvem</button><button class="outline" data-action="disable-push-notifications"' + (supported ? '' : ' disabled') + '>Desativar neste celular</button></div><p class="form-note">Este teste vem da nuvem, exatamente como um pedido do cardápio. Não é um aviso criado pelo próprio celular. O sistema não envia alerta para pedidos criados manualmente por vocês.</p></section></section>';
     }
     if (section === 'team') {
       const members = Array.isArray(state.teamMembers) ? state.teamMembers : [];
@@ -3949,21 +3949,10 @@
     try {
       if (!window.GelatosCloud?.hasSession?.()) throw new Error('Entre na nuvem antes de testar as notificações.');
       if (typeof Notification === 'undefined' || Notification.permission !== 'granted') throw new Error('Permita as notificações neste celular antes de fazer o teste.');
-      // Exibe primeiro um aviso gerado no próprio aparelho. Isso separa uma
-      // permissão bloqueada pelo Android de uma falha na entrega pela nuvem.
       const registration = await navigator.serviceWorker?.ready;
       if (!registration) throw new Error('O aplicativo ainda está sendo preparado. Feche e abra novamente antes de testar.');
-      await registration.showNotification('Teste local — Gelatos Lele', {
-        body: 'Se este aviso apareceu, o celular está pronto para receber pedidos.',
-        icon: './icon-logo-sistema-v68.png',
-        badge: './icon-logo-sistema-v68.png',
-        tag: 'gelatos-teste-local-' + Date.now(),
-        renotify: true,
-        vibrate: [180, 90, 180],
-        data: { url: './?abrir=pedidos' }
-      });
       const result = await window.GelatosCloud.testPush();
-      toast(result?.delivered ? 'Teste enviado. Confira também “Teste via nuvem” nas notificações.' : 'Não foi possível entregar o aviso de teste.');
+      toast(result?.delivered ? 'Aviso enviado pela nuvem. Ele deve aparecer como “Teste de notificação”.' : 'Não foi possível entregar o aviso de teste.');
     } catch (error) { toast(error.message || 'Não foi possível testar as notificações.'); }
   }
   document.addEventListener('click', event => {
