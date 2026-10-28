@@ -614,6 +614,24 @@ async function route(request, env) {
     await env.DB.prepare('INSERT INTO gelatos_push_subscriptions (subscription_id, store_slug, member_id, endpoint, subscription_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?) ON CONFLICT(store_slug, endpoint) DO UPDATE SET member_id = excluded.member_id, subscription_json = excluded.subscription_json, enabled = 1, updated_at = excluded.updated_at').bind(randomId('push'), slug, member.member_id, subscription.endpoint, JSON.stringify(subscription), stamp, stamp).run();
     return json({ ok: true }, 201, request, env);
   }
+  if (request.method === 'POST' && path === '/v1/push/test') {
+    const member = await requireMember(request, env, false);
+    const vapid = pushConfiguration(env);
+    if (!vapid) return error('As notificações ainda não foram configuradas na nuvem.', 503, request, env, 'PUSH_NAO_CONFIGURADO');
+    const rows = await env.DB.prepare('SELECT endpoint, subscription_json FROM gelatos_push_subscriptions WHERE store_slug = ? AND member_id = ? AND enabled = 1').bind(slug, member.member_id).all();
+    const subscriptions = (rows.results || []).flatMap(row => {
+      try {
+        const subscription = JSON.parse(String(row.subscription_json || ''));
+        return subscription?.endpoint === row.endpoint && isPushServiceEndpoint(subscription.endpoint) ? [subscription] : [];
+      } catch (_) { return []; }
+    });
+    if (!subscriptions.length) return error('Este celular ainda não está ativado para receber notificações.', 400, request, env, 'PUSH_NAO_ATIVADO');
+    const result = await sendPushBatch(subscriptions, { title: 'Teste de notificação', body: 'Tudo certo: este celular receberá os próximos pedidos.', url: 'https://jhonathanscolaro-stack.github.io/gelatos-lele/?abrir=pedidos', tag: 'gelatos-teste' }, vapid, { ttl: 300, urgency: 'high', topic: 'gelatos-test' });
+    if (result.gone.length) await env.DB.batch(result.gone.map(endpoint => env.DB.prepare('DELETE FROM gelatos_push_subscriptions WHERE store_slug = ? AND endpoint = ?').bind(slug, endpoint)));
+    if (result.delivered) await env.DB.prepare('UPDATE gelatos_push_subscriptions SET last_success_at = ?, updated_at = ? WHERE store_slug = ? AND member_id = ? AND enabled = 1').bind(now(), now(), slug, member.member_id).run();
+    if (!result.delivered) return error('O celular não aceitou o teste de notificação. Verifique as permissões do Android.', 502, request, env, 'PUSH_NAO_ENTREGUE');
+    return json({ ok: true, delivered: result.delivered }, 200, request, env);
+  }
   if (request.method === 'DELETE' && path === '/v1/push/subscriptions') {
     const member = await requireMember(request, env, false);
     const body = await parseBody(request);

@@ -131,6 +131,7 @@
   async function updatePassword(password) { return authenticated('/v1/auth/change-password', { method: 'POST', body: { password } }); }
   async function getPushConfig() { return authenticated('/v1/push/config'); }
   async function subscribePush(subscription) { return authenticated('/v1/push/subscriptions', { method: 'POST', body: { subscription } }); }
+  async function testPush() { return authenticated('/v1/push/test', { method: 'POST', body: {} }); }
   async function unsubscribePush(endpoint) { return authenticated('/v1/push/subscriptions', { method: 'DELETE', body: { endpoint } }); }
 
   window.GelatosCloud = Object.freeze({
@@ -138,7 +139,7 @@
     hasLegacySession, bootstrapMigration, getState, getRevision, saveState,
     registerProduction, getCatalog, getCatalogImages, getMediaRecovery,
     uploadMedia, placeCustomerOrder, listMembers, addMember, removeMember,
-    listBackups, restoreBackup, updatePassword, getPushConfig, subscribePush, unsubscribePush,
+    listBackups, restoreBackup, updatePassword, getPushConfig, subscribePush, testPush, unsubscribePush,
     // Mantidos somente para uma abertura intermediária não quebrar.
     isPasswordRecovery: () => false,
     resetPassword: async () => { throw new Error('Peça à proprietária para criar uma nova senha de acesso.'); },
