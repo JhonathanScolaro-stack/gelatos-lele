@@ -1,0 +1,44 @@
+name: Build Gelatos Lele Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'package.json'
+      - 'capacitor.config.ts'
+      - '.github/workflows/build-android-apk.yml'
+      - 'index.html'
+      - 'customer.html'
+      - '*.js'
+      - '*.css'
+      - '*.png'
+      - '*.webmanifest'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install app tools
+        run: npm install
+      - name: Prepare offline web files
+        run: |
+          rm -rf www
+          mkdir -p www
+          find . -maxdepth 1 -type f \( -name '*.html' -o -name '*.js' -o -name '*.css' -o -name '*.png' -o -name '*.webmanifest' \) -exec cp {} www/ \;
+      - name: Create Android project
+        run: |
+          if [ ! -d android ]; then npx cap add android; fi
+          npx cap sync android
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+      - name: Publish APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Gelatos-Lele-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
