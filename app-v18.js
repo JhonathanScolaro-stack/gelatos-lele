@@ -3919,9 +3919,17 @@
       if (!config?.enabled || !config?.publicKey) throw new Error('As notificações ainda estão sendo preparadas na nuvem. Tente novamente em alguns minutos.');
       const registration = await navigator.serviceWorker.ready;
       let subscription = await registration.pushManager.getSubscription();
-      if (!subscription) subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToBytes(config.publicKey) });
+      // Uma inscrição antiga pode continuar sendo aceita pelo serviço de push
+      // mesmo depois de o Android deixar de apresentá-la. Renovamos o vínculo
+      // ao ativar novamente, para o aviso chegar sempre ao registro atual do
+      // aplicativo instalado neste celular.
+      if (subscription) {
+        try { await window.GelatosCloud.unsubscribePush(subscription.endpoint); } catch (_) {}
+        await subscription.unsubscribe();
+      }
+      subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToBytes(config.publicKey) });
       await window.GelatosCloud.subscribePush(subscription.toJSON());
-      toast('Notificações ativadas neste celular.');
+      toast('Notificações ativadas e renovadas neste celular.');
       render({ preserveScroll: true });
     } catch (error) { toast(error.message || 'Não foi possível ativar as notificações.'); }
   }

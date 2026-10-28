@@ -341,7 +341,7 @@ async function notifyNewCustomerOrder(env, slug, order) {
     body: 'Pedido de ' + (order.items || []).reduce((sum, item) => sum + quantity(item.quantity), 0) + ' geladinho(s) · R$ ' + numberOf(order.total).toFixed(2).replace('.', ','),
     url: 'https://jhonathanscolaro-stack.github.io/gelatos-lele/?abrir=pedidos',
     tag: 'pedido-' + String(order.id || '')
-  }, vapid, { ttl: 3600, urgency: 'high', topic: 'gelatos-order' });
+  }, vapid, { ttl: 3600, urgency: 'high' });
   if (result.gone.length) await env.DB.batch(result.gone.map(endpoint => env.DB.prepare('DELETE FROM gelatos_push_subscriptions WHERE store_slug = ? AND endpoint = ?').bind(slug, endpoint)));
   if (result.delivered) await env.DB.prepare('UPDATE gelatos_push_subscriptions SET last_success_at = ?, updated_at = ? WHERE store_slug = ? AND enabled = 1').bind(now(), now(), slug).run();
   if (result.failed.length) console.error('Falha ao avisar novo pedido', result.failed.map(item => String(item.error?.message || item.error)).join(' | '));
