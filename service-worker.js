@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v66-icons-and-signature';
+const CACHE = 'gelatos-lele-company-v67-brand-footer';
 const ASSETS = [
   './',
   './index.html',
@@ -14,6 +14,7 @@ const ASSETS = [
   './styles-v64.css',
   './styles-v65.css',
   './styles-v66.css',
+  './styles-v67.css',
   './business-core.js',
   './cloud-config.js',
   './cloud-sync.js',
@@ -35,6 +36,7 @@ const ASSETS = [
   './customer-v64.css',
   './customer-v65.css',
   './customer-v66.css',
+  './customer-v67.css',
   './customer.js'
 ];
 self.addEventListener('install', event => {

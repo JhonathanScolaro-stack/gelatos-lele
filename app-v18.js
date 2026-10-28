@@ -2355,7 +2355,7 @@
   }
   function catalogLink() {
     try {
-    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=66';
+    if (cloudRevision !== null) return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html?v=67';
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(catalogPayload()))));
       return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html#c=' + encoded;
     } catch (_) {
@@ -2364,7 +2364,7 @@
   }
   function managementCatalogLink() {
     const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    return base + 'customer.html?v=66&gestao=1';
+    return base + 'customer.html?v=67&gestao=1';
   }
   function noticesPanel() {
     if (!state.notices) return '';
