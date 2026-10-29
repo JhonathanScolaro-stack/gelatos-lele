@@ -43,8 +43,17 @@ function brazilDate() {
 function cors(request, env) {
   const origin = request.headers.get('Origin');
   const allowed = String(env.ALLOWED_ORIGIN || '').replace(/\/$/, '');
+  // O PWA é servido pelo GitHub Pages. Já o APK Capacitor roda em uma
+  // origem HTTPS local, dentro do próprio aplicativo. Refletimos apenas
+  // essas origens conhecidas — nunca uma origem arbitrária enviada pela rede.
+  const trustedOrigins = new Set([
+    allowed,
+    'https://localhost',
+    'capacitor://localhost'
+  ]);
+  const responseOrigin = origin && trustedOrigins.has(origin) ? origin : allowed;
   return {
-    'Access-Control-Allow-Origin': origin === allowed ? origin : allowed,
+    'Access-Control-Allow-Origin': responseOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
     'Access-Control-Max-Age': '86400',
