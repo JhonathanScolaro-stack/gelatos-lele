@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v75-push';
+const CACHE = 'gelatos-lele-company-v76-push';
 const ASSETS = [
   './',
   './index.html',
@@ -12,7 +12,6 @@ const ASSETS = [
   './styles-v62.css',
   './styles-v63.css',
   './styles-v64.css',
-  './styles-v65.css',
   './styles-v66.css',
   './styles-v67.css',
   './business-core.js',
@@ -35,7 +34,6 @@ const ASSETS = [
   './customer-v60.css',
   './customer-v62.css',
   './customer-v64.css',
-  './customer-v65.css',
   './customer-v66.css',
   './customer-v67.css',
   './customer.js'

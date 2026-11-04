@@ -22,13 +22,16 @@
     // Um único registro controla as atualizações. Antes, o HTML registrava a
     // versão nova e o JavaScript registrava uma versão antiga, fazendo o PWA
     // alternar de worker e aparentar uma atualização a cada abertura.
-    if ('serviceWorker' in navigator) {
+    // O APK já possui os arquivos completos dentro dele. Não registramos o
+    // cache de PWA na camada nativa porque ele pode reabrir uma cópia antiga
+    // do sistema. No navegador, o PWA continua com o mesmo comportamento.
+    if (!window.Capacitor?.isNativePlatform?.() && 'serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('./service-worker.js?v=75').then(function (registration) {
+        navigator.serviceWorker.register('./service-worker.js?v=76').then(function (registration) {
           registration.update().catch(function () {});
           navigator.serviceWorker.addEventListener('controllerchange', function () {
-            if (sessionStorage.getItem('gelatos-app-reloaded-v75')) return;
-            sessionStorage.setItem('gelatos-app-reloaded-v75', '1');
+            if (sessionStorage.getItem('gelatos-app-reloaded-v76')) return;
+            sessionStorage.setItem('gelatos-app-reloaded-v76', '1');
             window.location.reload();
           }, { once: true });
         }).catch(function () {});

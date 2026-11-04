@@ -22,7 +22,7 @@
     // O cardápio também pode ser aberto por quem não acessa a área de gestão.
     // Registre e atualize o service worker aqui para que esses clientes nunca
     // permaneçam presos aos arquivos de uma versão anterior do cardápio.
-    if ('serviceWorker' in navigator) {
+    if (!window.Capacitor?.isNativePlatform?.() && 'serviceWorker' in navigator) {
       window.addEventListener('load', function () {
         navigator.serviceWorker.register('./service-worker.js?v=68').then(function (registration) {
           registration.update().catch(function () {});
