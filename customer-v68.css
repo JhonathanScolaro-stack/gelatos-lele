@@ -1,0 +1,18 @@
+/* Cardápio: referência de delivery moderna, com a paleta própria da Gelatos. */
+.catalog-open-status { display:flex; gap:11px; align-items:center; margin:14px auto 18px; max-width:760px; padding:13px 16px; border-radius:16px; border:1px solid rgba(92,51,59,.13); background:#fff; box-shadow:0 8px 22px rgba(81,39,52,.07); }
+.catalog-open-status > span { font-size:1.25rem; line-height:1; }
+.catalog-open-status.is-open > span { color:#2f9a65; }
+.catalog-open-status.is-closed > span { color:#bd526a; }
+.catalog-open-status div { display:grid; gap:2px; }
+.catalog-open-status b { color:#442e35; font-size:.98rem; }
+.catalog-open-status small { color:#765e65; }
+.hero { border-radius:0 0 26px 26px; }
+.catalog-type { border-radius:18px; overflow:hidden; box-shadow:0 7px 20px rgba(81,39,52,.06); }
+.catalog-type-heading { min-height:84px; }
+.product { border-radius:14px; }
+.product-open { min-height:108px; }
+.product-open img, .image-placeholder { border-radius:12px; }
+.catalog-closed-product { opacity:.78; }
+.checkout { border-radius:22px; box-shadow:0 12px 32px rgba(81,39,52,.1); }
+.products .catalog-heading { align-items:end; border-bottom:1px solid rgba(98,48,61,.12); padding-bottom:13px; }
+@media (min-width:760px) { .catalog-open-status { margin-top:20px; } .product-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; } .product { margin:0; } }

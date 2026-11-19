@@ -152,6 +152,19 @@
   function availableModes() { return String(catalog?.deliveryModes || 'Retirada,Entrega').split(',').map(mode => mode.trim()).filter(Boolean); }
   function scheduledEnabled() { return catalog?.scheduledEnabled !== false; }
   function scheduledLeadDays() { return Math.max(2, Math.min(30, Math.floor(num(catalog?.scheduledLeadDays || 2)))); }
+  function catalogAvailability(now = new Date()) {
+    const day = now.getDay();
+    const entry = catalog?.catalogHours?.[day] || catalog?.catalogHours?.[String(day)];
+    if (!entry || entry.enabled !== true || !/^\d{2}:\d{2}$/.test(String(entry.open || '')) || !/^\d{2}:\d{2}$/.test(String(entry.close || ''))) return { open: false, label: 'Fechado hoje', detail: 'Pedidos pelo cardápio estão fechados hoje.' };
+    const current = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+    const open = current >= entry.open && current < entry.close;
+    return open ? { open: true, label: 'Aberto hoje até ' + entry.close, detail: 'Você pode montar e enviar seu pedido agora.' } : { open: false, label: 'Fechado agora', detail: 'Hoje atendemos das ' + entry.open + ' às ' + entry.close + '.' };
+  }
+  function catalogIsOpen() { return catalogAvailability().open; }
+  function availabilityBanner() {
+    const status = catalogAvailability();
+    return '<section class="catalog-open-status ' + (status.open ? 'is-open' : 'is-closed') + '"><span aria-hidden="true">' + (status.open ? '●' : '○') + '</span><div><b>' + esc(status.label) + '</b><small>' + esc(status.detail) + '</small></div></section>';
+  }
   function localDate(value = new Date()) {
     const date = value instanceof Date ? value : new Date(value + 'T12:00:00');
     return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
@@ -286,6 +299,7 @@
     return { selected, quantity, subtotal, zone, delivery, free, fee, freeReason: freeByValue ? 'Frete grátis por valor mínimo' : freeByQuantity ? 'Frete grátis por quantidade mínima' : '', total: subtotal + fee };
   }
   function validateOrderDraft(result) {
+    if (!catalogIsOpen()) return 'O cardápio está fechado para pedidos agora. Confira o horário no topo e volte durante o atendimento.';
     if (draft.customer.trim().length < 2) return 'Informe seu nome.';
     if (draft.phone.replace(/\D/g, '').length < 10) return 'Informe um WhatsApp válido para confirmar o pedido.';
     if (!result.selected.length) return 'Escolha pelo menos um geladinho.';
@@ -309,10 +323,11 @@
     const soldOut = !scheduled && available === 0;
     const maximum = scheduled ? 99 : available;
     const category = categoryForProduct(product);
-    return '<article class="product ' + (soldOut ? 'sold-out' : '') + '"><button class="product-open" type="button" data-action="choose-product" data-product="' + esc(product.id) + '" aria-expanded="' + opened + '">' +
+    const closed = !catalogIsOpen();
+    return '<article class="product ' + (soldOut ? 'sold-out' : '') + (closed ? ' catalog-closed-product' : '') + '"><button class="product-open" type="button" data-action="choose-product" data-product="' + esc(product.id) + '" aria-expanded="' + opened + '">' +
       (imageSource(product.id) ? '<img src="' + esc(imageSource(product.id)) + '" alt="' + esc(product.name) + '">' : '<div class="image-placeholder" aria-hidden="true"></div>') +
       '<span class="product-copy"><span class="product-title"><b>' + esc(product.name) + '</b>' + (chosen ? '<em>' + chosen + ' no pedido</em>' : '') + '</span><span class="product-type category-' + esc(categorySlug(category.id)) + '">' + esc(category.name) + '</span><span class="product-description">' + esc(product.description || 'Geladinho artesanal.') + '</span><span class="price">' + money.format(num(product.price)) + '</span><span class="availability ' + (soldOut ? 'unavailable' : '') + '">' + (scheduled ? 'Disponível por encomenda' : soldOut ? 'Esgotado no momento' : available + ' disponível(is)') + '</span></span><span class="product-arrow" aria-hidden="true">›</span></button>' +
-      (opened ? '<section class="product-picker"><b>' + (soldOut ? 'Este sabor está esgotado.' : 'Quantos você quer?') + '</b>' + (soldOut ? '<span>Acompanhe o cardápio; ele volta a ficar disponível assim que houver produção.</span>' : '<div class="quantity"><button type="button" data-change="' + esc(product.id) + ':-1" aria-label="Diminuir ' + esc(product.name) + '"' + (chosen ? '' : ' disabled') + '>−</button><strong>' + chosen + '</strong><button type="button" data-change="' + esc(product.id) + ':1" aria-label="Aumentar ' + esc(product.name) + '"' + (chosen >= maximum ? ' disabled' : '') + '>+</button><small>' + (scheduled ? 'A Gelatos Lele confirmará a disponibilidade para a data escolhida.' : 'Máximo disponível: ' + available) + '</small></div>') + '<button type="button" class="picker-back" data-action="close-product">← Voltar aos sabores</button></section>' : '') +
+      (opened ? '<section class="product-picker"><b>' + (closed ? 'Pedidos fechados neste horário.' : soldOut ? 'Este sabor está esgotado.' : 'Quantos você quer?') + '</b>' + (closed ? '<span>Confira o horário de atendimento no topo do cardápio.</span>' : soldOut ? '<span>Acompanhe o cardápio; ele volta a ficar disponível assim que houver produção.</span>' : '<div class="quantity"><button type="button" data-change="' + esc(product.id) + ':-1" aria-label="Diminuir ' + esc(product.name) + '"' + (chosen ? '' : ' disabled') + '>−</button><strong>' + chosen + '</strong><button type="button" data-change="' + esc(product.id) + ':1" aria-label="Aumentar ' + esc(product.name) + '"' + (chosen >= maximum ? ' disabled' : '') + '>+</button><small>' + (scheduled ? 'A Gelatos Lele confirmará a disponibilidade para a data escolhida.' : 'Máximo disponível: ' + available) + '</small></div>') + '<button type="button" class="picker-back" data-action="close-product">← Voltar aos sabores</button></section>' : '') +
       '</article>';
   }
   // Pequenos pictogramas próprios para o agrupamento do cardápio. Eles não
@@ -348,6 +363,7 @@
     return '<input name="locationUrl" type="hidden" value="' + esc(location) + '"><div class="location-actions"><button type="button" class="outline" data-action="capture-location">Usar minha localização fixa</button>' + (location ? '<a href="' + esc(location) + '" target="_blank" rel="noopener">Localização adicionada</a><button type="button" class="text-link" data-action="clear-location">Remover</button>' : '<span>Opcional: envia um ponto fixo do mapa junto do pedido.</span>') + '</div>';
   }
   function orderForm(result, zones, modes) {
+    const closed = !catalogIsOpen();
     const zoneField = result.delivery ? '<label>Local de entrega<select name="zoneId" required><option value="">Selecione o local</option>' + zones.map(zone => '<option value="' + esc(zone.id) + '"' + (String(zone.id) === String(draft.zoneId) ? ' selected' : '') + '>' + esc(zone.name) + ' · frete ' + money.format(zone.fee) + '</option>').join('') + '</select></label>' : '';
     const pickupNotice = !result.delivery && String(catalog.pickupAddress || '').trim() ? '<section class="notice"><b>Endereço para retirada:</b><br>' + esc(catalog.pickupAddress).replace(/\n/g, '<br>') + '</section>' : '';
     const usingThermas = result.delivery && thermasRequired(result.zone);
@@ -355,7 +371,7 @@
     const addressPlaceholder = result.delivery ? 'Rua, número, bairro e ponto de referência.' : 'Ex.: horário desejado para retirar.';
     const addressField = usingThermas ? thermasFields(result) : '<label>' + addressLabel + '<textarea name="address"' + (result.delivery ? ' required' : '') + ' placeholder="' + addressPlaceholder + '">' + esc(draft.address) + '</textarea></label>' + (result.delivery ? fixedLocationFields() : '');
     const scheduleNotice = isScheduled() ? '<section class="notice scheduled-notice"><b>Encomenda para ' + esc(scheduledDateText(draft.scheduledFor)) + '.</b><br>Depois do envio, a Gelatos Lele confirmará o preparo e o pagamento pelo WhatsApp.</section>' : '';
-    return pickupNotice + '<form id="customerOrder" class="panel checkout"><h2>Seu pedido</h2>' + scheduleNotice + cartLines(result) + '<label>Seu nome<input name="customer" required value="' + esc(draft.customer) + '" placeholder="Ex.: Maria"></label><label>WhatsApp para confirmação<input name="phone" inputmode="tel" required value="' + esc(draft.phone) + '" placeholder="Ex.: 11999999999"></label><p class="small">Usaremos somente para confirmar este pedido.</p><label>Forma de receber<select name="mode">' + modes.map(mode => '<option' + (mode === draft.mode ? ' selected' : '') + '>' + esc(mode) + '</option>').join('') + '</select></label>' + zoneField + addressField + '<label>Forma de pagamento<select name="payment"><option' + (draft.payment === 'Pix' ? ' selected' : '') + '>Pix</option><option' + (draft.payment === 'Dinheiro' ? ' selected' : '') + '>Dinheiro</option><option' + (draft.payment === 'Crédito' ? ' selected' : '') + '>Crédito</option><option' + (draft.payment === 'Débito' ? ' selected' : '') + '>Débito</option></select></label>' + totalsMarkup(result) + '<button class="primary">Revisar pedido</button><p class="small">Antes de enviar, você verá itens, frete, endereço e valor total.</p></form>';
+    return pickupNotice + '<form id="customerOrder" class="panel checkout"><h2>Seu pedido</h2>' + scheduleNotice + cartLines(result) + '<label>Seu nome<input name="customer" required value="' + esc(draft.customer) + '" placeholder="Ex.: Maria"></label><label>WhatsApp para confirmação<input name="phone" inputmode="tel" required value="' + esc(draft.phone) + '" placeholder="Ex.: 11999999999"></label><p class="small">Usaremos somente para confirmar este pedido.</p><label>Forma de receber<select name="mode">' + modes.map(mode => '<option' + (mode === draft.mode ? ' selected' : '') + '>' + esc(mode) + '</option>').join('') + '</select></label>' + zoneField + addressField + '<label>Forma de pagamento<select name="payment"><option' + (draft.payment === 'Pix' ? ' selected' : '') + '>Pix</option><option' + (draft.payment === 'Dinheiro' ? ' selected' : '') + '>Dinheiro</option><option' + (draft.payment === 'Crédito' ? ' selected' : '') + '>Crédito</option><option' + (draft.payment === 'Débito' ? ' selected' : '') + '>Débito</option></select></label>' + totalsMarkup(result) + '<button class="primary"' + (closed ? ' disabled' : '') + '>' + (closed ? 'Pedidos fechados agora' : 'Revisar pedido') + '</button><p class="small">' + (closed ? 'O cardápio volta a aceitar pedidos no próximo horário de atendimento.' : 'Antes de enviar, você verá itens, frete, endereço e valor total.') + '</p></form>';
   }
   function reviewForm(result) {
     const deliveryText = result.delivery ? (result.zone?.name || 'Local não informado') : 'Retirada';
@@ -371,7 +387,7 @@
     const groups = catalogGroups();
     const products = groups.length ? groups.map(categoryCard).join('') : '<p class="empty">Nenhum sabor foi cadastrado no cardápio ainda.</p>';
     const logo = imageSource(CATALOG_LOGO_ID) || DEFAULT_CATALOG_LOGO;
-    root.innerHTML = '<section class="hero">' + managementBack() + '<img class="catalog-logo" src="' + esc(logo) + '" alt="' + esc(catalog.brand || 'Gelatos Lele') + '"><h1 class="catalog-brand-name">' + esc(catalog.brand || 'Gelatos Lele') + '</h1><p>' + esc(catalog.intro || 'Confira os sabores disponíveis.') + '</p></section>' +
+    root.innerHTML = '<section class="hero">' + managementBack() + '<img class="catalog-logo" src="' + esc(logo) + '" alt="' + esc(catalog.brand || 'Gelatos Lele') + '"><h1 class="catalog-brand-name">' + esc(catalog.brand || 'Gelatos Lele') + '</h1><p>' + esc(catalog.intro || 'Confira os sabores disponíveis.') + '</p></section>' + availabilityBanner() +
       (catalog.address ? '<section class="notice"><b>Informações:</b><br>' + esc(catalog.address).replace(/\n/g, '<br>') + '</section>' : '') +
       fulfillmentChooser() + '<section class="products"><div class="catalog-heading"><div><h2>' + (isScheduled() ? 'Cardápio para encomenda' : 'Cardápio pronta entrega') + '</h2><span>' + (isScheduled() ? 'Escolha sabores para a data desejada. A produção será confirmada pela Gelatos Lele.' : 'Escolha por tipo e toque em um sabor para informar a quantidade.') + '</span></div><button type="button" class="catalog-refresh" data-action="refresh-catalog">Atualizar disponibilidade</button></div>' + products + '</section>' +
       (reviewing ? reviewForm(result) : orderForm(result, zones, modes)) + catalogCredit() + customerWhatsAppButton();
@@ -442,6 +458,7 @@
       return;
     }
     if (action === 'choose-product') {
+      if (!catalogIsOpen()) { alert('O cardápio está fechado para pedidos agora. Confira o horário no topo.'); return; }
       syncDraft(document.getElementById('customerOrder'));
       const id = event.target.closest('[data-product]')?.dataset.product;
       selectedProductId = String(selectedProductId) === String(id) ? '' : id;
@@ -476,6 +493,7 @@
       return;
     }
     if (action === 'choose-order-kind') {
+      if (!catalogIsOpen()) { alert('O cardápio está fechado para pedidos agora. Confira o horário no topo.'); return; }
       syncDraft(document.getElementById('customerOrder'));
       draft.orderKind = event.target.closest('[data-kind]')?.dataset.kind === 'scheduled' && scheduledEnabled() ? 'scheduled' : 'ready';
       if (isScheduled() && draft.scheduledFor < scheduledMinDate()) draft.scheduledFor = scheduledMinDate();

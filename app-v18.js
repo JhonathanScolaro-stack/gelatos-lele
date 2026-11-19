@@ -145,7 +145,17 @@
     reservationMinutes: '20',
     scheduledEnabled: true,
     scheduledLeadDays: '2',
-    scheduledMaxItemsPerDay: ''
+    scheduledMaxItemsPerDay: '',
+    // 0 = domingo ... 6 = sábado. Vazio significa fechado naquele dia.
+    catalogHours: {
+      0: { enabled: false, open: '', close: '' },
+      1: { enabled: true, open: '09:00', close: '18:00' },
+      2: { enabled: true, open: '09:00', close: '18:00' },
+      3: { enabled: true, open: '09:00', close: '18:00' },
+      4: { enabled: true, open: '09:00', close: '18:00' },
+      5: { enabled: true, open: '09:00', close: '18:00' },
+      6: { enabled: true, open: '09:00', close: '18:00' }
+    }
   };
   // O fechamento inicial registra a realidade financeira no dia em que a
   // empresa começa a usar o app. Não representa vendas novas e, portanto,
@@ -303,6 +313,7 @@
           : legacyReserved;
         return {
           ...item,
+          tags: Array.isArray(item.tags) ? Array.from(new Set(item.tags.map(tag => String(tag || '').trim()).filter(Boolean))).slice(0, 12) : [],
           items,
           date: item.date || today(),
           dueDate: item.dueDate || item.date || today(),
@@ -373,7 +384,7 @@
       'category-edit': 'records-categories'
     };
     const screen = fallback[String(value || '')] || String(value || '');
-    return /^(home|orders-(new|history|calendar)|stock-(purchase|ingredient|supply|ready)|recipes|production|finance-(overview|receivable|payable|opening|opening-receive|opening-pay)|reports-(orders|finance|stock)|records-(catalog|suppliers|categories)|resale-(dashboard|new|history|people)|tools-(compare|capacity)|settings-(home|cloud|team|notifications|appearance|message|catalog|delivery|backup|restore-preview))$/.test(screen) ? screen : 'home';
+    return /^(home|orders-(new|history|calendar)|stock-(purchase|ingredient|supply|ready)|recipes|production|finance-(overview|receivable|payable|opening|opening-receive|opening-pay)|reports-(orders|finance|stock|production)|records-(catalog|suppliers|categories)|resale-(dashboard|new|history|people)|tools-(compare|capacity)|settings-(home|cloud|team|notifications|appearance|message|catalog|delivery|backup|restore-preview))$/.test(screen) ? screen : 'home';
   }
   function loadLastScreen() {
     try { return resumableScreen(localStorage.getItem(LAST_SCREEN_KEY)); }
@@ -448,7 +459,7 @@
     cloudAuthView: 'signin',
     cloudAuthEmail: '',
     cloudAuthError: '',
-    reportFilter: { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '' },
+    reportFilter: { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '', tag: '' },
     reportRanking: ''
   };
   // Cada endereço (Netlify, GitHub Pages etc.) possui seu próprio armazenamento do navegador.
@@ -932,7 +943,7 @@
       const [, kind, preset] = route.split(':');
       state.screen = 'reports-' + kind;
       state.reportRanking = preset === 'week' || preset === 'month' || preset === 'all' ? preset : '';
-      state.reportFilter = preset ? reportPreset(preset) : { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '' };
+      state.reportFilter = preset ? reportPreset(preset) : { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '', tag: '' };
     } else if (route.startsWith('records:')) state.screen = 'records-' + route.split(':')[1];
     else if (route.startsWith('tools:')) state.screen = 'tools-' + route.split(':')[1];
     else if (route.startsWith('settings:')) state.screen = 'settings-' + route.split(':')[1];
@@ -1064,7 +1075,7 @@
       navGroup('Controle de estoque', 'stock', [['Estoque produzido', 'stock:ready', 'stock'], ['Estoque de insumos', 'stock:supply', 'stock'], ['Estoque de ingredientes', 'stock:ingredient', 'recipe'], ['Produções', 'production', 'production']], 'stock') +
       navGroup('Revendas', 'resale', [['Visão das revendas', 'resale:dashboard', 'resale'], ['Nova venda para revenda', 'resale:new', 'plus'], ['Vendas para revenda', 'resale:history', 'orders'], ['Cadastro de revendedores', 'resale:people', 'people']], 'resale') +
       navGroup('Financeiro', 'finance', [['Visão financeira', 'finance:overview', 'finance'], ['Contas a receber', 'finance:receivable', 'price'], ['Contas pagas', 'finance:payable', 'finance'], ['Fechamento inicial', 'finance:opening', 'report']], 'finance') +
-      navGroup('Relatórios', 'reports', [['Pedidos', 'reports:orders', 'orders'], ['Financeiro', 'reports:finance', 'finance'], ['Estoque', 'reports:stock', 'stock']], 'report') +
+      navGroup('Relatórios', 'reports', [['Pedidos', 'reports:orders', 'orders'], ['Financeiro', 'reports:finance', 'finance'], ['Estoque', 'reports:stock', 'stock'], ['Produção mensal', 'reports:production', 'production']], 'report') +
       navGroup('Cadastros', 'records', [['Cadastrar compra', 'stock:purchase', 'cart'], ['Cardápio / sabores', 'records:catalog', 'tag'], ['Categorias de geladinhos', 'records:categories', 'records'], ['Ingredientes', 'stock:ingredient', 'recipe'], ['Insumos', 'stock:supply', 'stock'], ['Fornecedores', 'records:suppliers', 'people'], ['Nova receita', 'recipes', 'recipe']], 'records') +
       navGroup('Ferramentas', 'tools', [['Preços e compras', 'tools:compare', 'price'], ['Produção possível', 'tools:capacity', 'capacity']], 'tools') +
       navGroup('Configurações', 'settings', [['Visão geral', 'settings:home', 'settings'], ['Nuvem e sincronização', 'settings:cloud', 'cloud'], ['Notificações de pedidos', 'settings:notifications', 'bell'], ['Logo do app', 'settings:appearance', 'image'], ['Mensagem e Pix', 'settings:message', 'message'], ['Cardápio do cliente', 'settings:catalog', 'cart'], ['Frete e entrega', 'settings:delivery', 'delivery'], ['Backup', 'settings:backup', 'backup']], 'settings') +
@@ -1213,6 +1224,7 @@
     return {
       customer: f.customer?.value || '',
       phone: f.phone?.value || '',
+      tags: f.tags?.value || '',
       payment: f.payment?.value || 'Pix',
       date: f.date?.value || today(),
       dueDate: f.dueDate?.value || today(),
@@ -1340,7 +1352,8 @@
     const addressLocation = String(order.address || '').match(/https:\/\/www\.google\.com\/maps\?q=[^\s<]+/i)?.[0] || '';
     const locationUrl = String(order.locationUrl || '').startsWith('https://www.google.com/maps') ? String(order.locationUrl) : addressLocation;
     const locationLink = locationUrl ? '<dt>Localização fixa</dt><dd><a class="fixed-location-link" href="' + esc(locationUrl) + '" target="_blank" rel="noopener">Abrir mapa</a></dd>' : '';
-    return detail(order.customer, brDate(order.date) + (order.orderKind === 'scheduled' ? ' · entrega/retirada em ' + brDate(order.scheduledFor || order.dueDate) : ' · vence ' + brDate(order.dueDate)) + ' · ' + esc(order.paymentMethod), money(order.total), orderStatus(order), '<dl><dt>WhatsApp</dt><dd>' + esc(order.phone || 'não informado') + '</dd><dt>Recebimento</dt><dd>' + esc(order.deliveryMode || order.mode || 'Retirada') + '</dd><dt>Local</dt><dd>' + esc(destination) + '</dd>' + (address ? '<dt>Endereço / observação</dt><dd>' + esc(address).replace(/\n/g, '<br>') + '</dd>' : '') + locationLink + schedule + reservation + (totalDiscount > 0 ? '<dt>Descontos por sabor</dt><dd>− ' + money(totalDiscount) + '</dd>' : '') + '<dt>Frete cobrado</dt><dd>' + money(order.freight) + '</dd><dt>Custo vendido</dt><dd>' + money(order.cost) + '</dd><dt>Custo de entrega</dt><dd>' + money(order.deliveryCost) + '</dd><dt>Taxa de pagamento</dt><dd>' + money(order.paymentFee) + '</dd><dt>Lucro da venda</dt><dd>' + money(order.profit) + '</dd></dl>' + checklist + '<h4>Itens</h4><ul>' + lines + '</ul><div class="details-actions">' + actions + '</div>');
+    const tags = Array.isArray(order.tags) && order.tags.length ? '<div class="order-tags">' + order.tags.map(tag => '<span>#' + esc(tag) + '</span>').join('') + '</div>' : '';
+    return detail(order.customer, brDate(order.date) + (order.orderKind === 'scheduled' ? ' · entrega/retirada em ' + brDate(order.scheduledFor || order.dueDate) : ' · vence ' + brDate(order.dueDate)) + ' · ' + esc(order.paymentMethod), money(order.total), orderStatus(order), tags + '<dl><dt>WhatsApp</dt><dd>' + esc(order.phone || 'não informado') + '</dd><dt>Recebimento</dt><dd>' + esc(order.deliveryMode || order.mode || 'Retirada') + '</dd><dt>Local</dt><dd>' + esc(destination) + '</dd>' + (address ? '<dt>Endereço / observação</dt><dd>' + esc(address).replace(/\n/g, '<br>') + '</dd>' : '') + locationLink + schedule + reservation + (totalDiscount > 0 ? '<dt>Descontos por sabor</dt><dd>− ' + money(totalDiscount) + '</dd>' : '') + '<dt>Frete cobrado</dt><dd>' + money(order.freight) + '</dd><dt>Custo vendido</dt><dd>' + money(order.cost) + '</dd><dt>Custo de entrega</dt><dd>' + money(order.deliveryCost) + '</dd><dt>Taxa de pagamento</dt><dd>' + money(order.paymentFee) + '</dd><dt>Lucro da venda</dt><dd>' + money(order.profit) + '</dd></dl>' + checklist + '<h4>Itens</h4><ul>' + lines + '</ul><div class="details-actions">' + actions + '</div>');
   }
   function orderDeliverySummary(draft, subtotal = draftOrderTotal()) {
     const modes = orderDeliveryModes();
@@ -1500,10 +1513,12 @@
   function ordersScreen() {
     if (state.screen === 'orders-calendar') return orderCalendarScreen();
     if (state.screen === 'orders-history') {
-      const cards = data.orders.filter(order => !order.archived && order.source !== 'revenda').slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(orderCard).join('') || empty('Nenhum pedido criado ainda.');
-      return '<section class="screen active">' + heading('Controle de pedidos', 'Pedidos realizados', 'Acompanhe encomendas, produção, reservas, pagamento e separação. O histórico financeiro continua preservado.') + '<div class="list">' + cards + '</div></section>';
+      const tags = Array.from(new Set(data.orders.flatMap(order => Array.isArray(order.tags) ? order.tags : []))).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+      const selectedTag = String(state.orderTagFilter || '');
+      const cards = data.orders.filter(order => !order.archived && order.source !== 'revenda' && (!selectedTag || (order.tags || []).includes(selectedTag))).slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(orderCard).join('') || empty(selectedTag ? 'Nenhum pedido encontrado com esta tag.' : 'Nenhum pedido criado ainda.');
+      return '<section class="screen active">' + heading('Controle de pedidos', 'Pedidos realizados', 'Acompanhe encomendas, produção, reservas, pagamento e separação. Use tags para separar regiões, rotas ou prioridades.') + '<section class="panel compact-filter"><label>Filtrar por tag<select data-order-tag-filter><option value="">Todas as tags</option>' + tags.map(tag => '<option value="' + esc(tag) + '"' + (tag === selectedTag ? ' selected' : '') + '>' + esc(tag) + '</option>').join('') + '</select></label></section><div class="list">' + cards + '</div></section>';
     }
-    const draft = { customer: '', phone: '', payment: 'Pix', date: today(), dueDate: today(), orderKind: 'ready', scheduledFor: scheduledMinDate(), deliveryMode: defaultOrderDeliveryMode(), zoneId: '', address: '', ...(state.orderDraft || {}) };
+    const draft = { customer: '', phone: '', tags: '', payment: 'Pix', date: today(), dueDate: today(), orderKind: 'ready', scheduledFor: scheduledMinDate(), deliveryMode: defaultOrderDeliveryMode(), zoneId: '', address: '', ...(state.orderDraft || {}) };
     const scheduled = draft.orderKind === 'scheduled';
     const dateField = scheduled
       ? field('Data desejada para a encomenda', '<input name="scheduledFor" required type="date" min="' + scheduledMinDate() + '" value="' + esc(draft.scheduledFor || scheduledMinDate()) + '">', 'A data precisa ter pelo menos ' + scheduledLeadDays() + ' dias para o preparo.')
@@ -1512,6 +1527,7 @@
     return '<section class="screen active">' + heading('Controle de pedidos', 'Novo pedido', 'Registre uma venda feita por telefone, WhatsApp ou presencialmente — inclusive encomendas de clientes que não usam o link.') + '<form id="orderForm" class="panel form-panel"><input type="hidden" name="orderKind" value="' + (scheduled ? 'scheduled' : 'ready') + '"><h2>Dados do cliente</h2><div class="form-grid two">' +
       field('Nome do cliente', '<input name="customer" required value="' + esc(draft.customer) + '" placeholder="Ex.: Maria">') +
       field('WhatsApp', '<input name="phone" inputmode="tel" value="' + esc(draft.phone) + '" placeholder="Ex.: 11999999999">') +
+      field('Tags do pedido', '<input name="tags" value="' + esc(draft.tags || '') + '" placeholder="Ex.: Jundiaí, rota sexta">', 'Separe tags por vírgula. Elas ajudam a filtrar e organizar a separação.') +
       '</div>' + orderTypeChooser(draft) + '<div class="section-line"><div><h3>Itens do pedido</h3><p>' + itemText + '</p></div></div><div class="line-list">' + orderLinesMarkup() + '</div><button type="button" class="outline full" data-action="add-order-line">+ Adicionar outro geladinho</button><div class="form-grid two">' +
       field('Forma de pagamento', '<select name="payment">' + METHODS.map(method => '<option' + (draft.payment === method ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') +
       dateField +
@@ -1522,7 +1538,7 @@
     const order = data.orders.find(item => String(item.id) === String(state.editOrder));
     if (!order) return '<section class="screen active">' + empty('Pedido não encontrado.') + '</section>';
     const matchingZone = deliveryZones(data.settings.deliveryZones).find(zone => zone.name === String(order.deliveryZone || ''));
-    const draft = { customer: order.customer, phone: order.phone || '', payment: order.paymentMethod, date: order.date, dueDate: order.dueDate, orderKind: order.orderKind, scheduledFor: order.scheduledFor || order.dueDate, deliveryMode: order.deliveryMode || order.mode || defaultOrderDeliveryMode(), zoneId: order.zoneId || matchingZone?.id || '', address: order.address || '', ...(state.orderDraft || {}) };
+    const draft = { customer: order.customer, phone: order.phone || '', tags: (order.tags || []).join(', '), payment: order.paymentMethod, date: order.date, dueDate: order.dueDate, orderKind: order.orderKind, scheduledFor: order.scheduledFor || order.dueDate, deliveryMode: order.deliveryMode || order.mode || defaultOrderDeliveryMode(), zoneId: order.zoneId || matchingZone?.id || '', address: order.address || '', ...(state.orderDraft || {}) };
     const scheduled = order.orderKind === 'scheduled';
     const dateField = scheduled
       ? field('Data programada', '<input name="scheduledFor" required type="date" value="' + esc(draft.scheduledFor || order.scheduledFor || order.dueDate) + '">', 'Ao mudar a data, o sistema aplica o prazo mínimo atual e verifica a capacidade do dia.')
@@ -1530,6 +1546,7 @@
     return '<section class="screen active">' + heading('Controle de pedidos', 'Editar pedido', scheduled ? 'Ao salvar, o app devolve a reserva anterior, recalcula a divisão por sabor e volta a separar automaticamente o que já estiver pronto.' : 'As quantidades, o total, custo e reserva do estoque são recalculados ao salvar.') + '<form id="orderEditForm" class="panel form-panel"><input type="hidden" name="id" value="' + esc(order.id) + '"><input type="hidden" name="orderKind" value="' + esc(order.orderKind) + '">' + orderTypeChooser(draft, true) + '<div class="form-grid two">' +
       field('Nome do cliente', '<input name="customer" required value="' + esc(draft.customer) + '">') +
       field('WhatsApp', '<input name="phone" inputmode="tel" value="' + esc(draft.phone) + '">') +
+      field('Tags do pedido', '<input name="tags" value="' + esc(draft.tags || '') + '" placeholder="Ex.: Jundiaí, rota sexta">', 'Separe tags por vírgula.') +
       field('Forma de pagamento', '<select name="payment">' + METHODS.map(method => '<option' + (draft.payment === method ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') +
       dateField +
       field('Data do pedido', '<input name="date" type="date" value="' + esc(draft.date) + '">') +
@@ -1581,10 +1598,11 @@
     return { lines, subtotal, cost, profit: round(subtotal - cost), shortages };
   }
   function resaleProductOptions(selected) {
-    const entries = data.readyStock.filter(product => recipeById()[product.recipeId]?.resaleEnabled === true).slice().sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
-    return '<option value="">Selecione um sabor</option>' + entries.map(product => {
-      const recipe = recipeById()[product.recipeId];
-      return '<option value="' + esc(product.recipeId) + '"' + (String(product.recipeId) === String(selected) ? ' selected' : '') + (n(product.quantity) > 0 ? '' : ' disabled') + '>' + esc(product.name + ' · ' + qtyText(product.quantity) + ' un. em estoque · revenda ' + money(recipe.resaleUnitPrice)) + '</option>';
+    const entries = data.recipes.filter(recipe => recipe.resaleEnabled === true).slice().sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+    return '<option value="">Selecione um sabor</option>' + entries.map(recipe => {
+      const product = ready()[recipe.id];
+      const available = n(product?.quantity);
+      return '<option value="' + esc(recipe.id) + '"' + (String(recipe.id) === String(selected) ? ' selected' : '') + '>' + esc(recipe.name + ' · ' + qtyText(available) + ' un. em estoque · revenda ' + money(recipe.resaleUnitPrice)) + '</option>';
     }).join('');
   }
   function resaleLineMarkup() {
@@ -1645,8 +1663,8 @@
     if (state.screen === 'resale-new') {
       const draft = { resellerId: '', payment: 'Pix', date: today(), dueDate: today(), paidNow: false, note: '', ...(state.resaleDraft || {}) };
       const resellerOptions = '<option value="">Selecione a revendedora</option>' + activeResellers().map(item => '<option value="' + esc(item.id) + '"' + (String(item.id) === String(draft.resellerId) ? ' selected' : '') + '>' + esc(item.name + (item.city ? ' · ' + item.city : '')) + '</option>').join('');
-      const resaleReady = data.readyStock.some(product => recipeById()[product.recipeId]?.resaleEnabled === true && n(product.quantity) > 0);
-      return '<section class="screen active">' + heading('Revendas', 'Nova venda para revenda', 'Compra direta: o lote sai agora do estoque pronto e o valor fica em Contas a receber até o pagamento.') + (!resaleReady ? '<section class="panel caution"><b>Nenhum sabor pronto está liberado para revenda.</b><p>Em Cadastros › Cardápio / sabores, abra o sabor, marque “Disponível para revenda” e informe seu valor fixo por unidade. Depois produza o lote.</p></section>' : '') + (activeResellers().length ? '<form id="resaleForm" class="panel form-panel"><div class="form-grid two">' + field('Revendedora', '<select name="resellerId" required>' + resellerOptions + '</select>') + field('Forma de recebimento', '<select name="payment">' + METHODS.map(method => '<option' + (method === draft.payment ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') + field('Data da venda', '<input name="date" type="date" value="' + esc(draft.date) + '">') + field('Vencimento combinado', '<input name="dueDate" type="date" value="' + esc(draft.dueDate) + '">') + '</div><label class="catalog-switch"><input name="paidNow" type="checkbox"' + (draft.paidNow ? ' checked' : '') + '> Já recebi este valor</label><div class="section-line"><div><h3>Lote separado</h3><p>Selecione os sabores prontos liberados para revenda. O preço é fixo por sabor e vem do Cardápio / sabores.</p></div></div><div class="resale-table-title"><span>Sabor</span><span>Quantidade</span><span>Preço fixo</span><span></span></div><div class="resale-lines">' + resaleLineMarkup() + '</div><button type="button" class="outline full" data-action="add-resale-line">+ Adicionar outro sabor</button><label class="form-field"><span>Observação</span><textarea name="note" rows="2" placeholder="Ex.: lote entregue em 24/09.">' + esc(draft.note) + '</textarea></label>' + resalePreview() + '<button class="primary full"' + (resaleReady ? '' : ' disabled') + '>Confirmar venda e separar lote</button></form>' : '<section class="panel"><p>Antes da primeira venda, cadastre a revendedora para manter o controle correto de prazo, contato e contas a receber.</p><button class="primary full" data-action="new-reseller">Cadastrar revendedora</button></section>') + '</section>';
+      const resaleReady = data.recipes.some(recipe => recipe.resaleEnabled === true && n(recipe.resaleUnitPrice) > 0);
+      return '<section class="screen active">' + heading('Revendas', 'Nova venda para revenda', 'Todos os sabores liberados para revenda aparecem abaixo, mesmo sem estoque. O app só confirma a saída quando houver quantidade pronta suficiente.') + (!resaleReady ? '<section class="panel caution"><b>Nenhum sabor está liberado para revenda.</b><p>Em Cadastros › Cardápio / sabores, abra o sabor, marque “Disponível para revenda” e informe seu valor fixo por unidade.</p></section>' : '') + (activeResellers().length ? '<form id="resaleForm" class="panel form-panel"><div class="form-grid two">' + field('Revendedora', '<select name="resellerId" required>' + resellerOptions + '</select>') + field('Forma de recebimento', '<select name="payment">' + METHODS.map(method => '<option' + (method === draft.payment ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') + field('Data da venda', '<input name="date" type="date" value="' + esc(draft.date) + '">') + field('Vencimento combinado', '<input name="dueDate" type="date" value="' + esc(draft.dueDate) + '">') + '</div><label class="catalog-switch"><input name="paidNow" type="checkbox"' + (draft.paidNow ? ' checked' : '') + '> Já recebi este valor</label><div class="section-line"><div><h3>Lote separado</h3><p>Selecione qualquer sabor liberado. A quantidade em estoque aparece ao lado e o sistema avisa antes de confirmar se faltar produto.</p></div></div><div class="resale-table-title"><span>Sabor</span><span>Quantidade</span><span>Preço fixo</span><span></span></div><div class="resale-lines">' + resaleLineMarkup() + '</div><button type="button" class="outline full" data-action="add-resale-line">+ Adicionar outro sabor</button><label class="form-field"><span>Observação</span><textarea name="note" rows="2" placeholder="Ex.: lote entregue em 24/09.">' + esc(draft.note) + '</textarea></label>' + resalePreview() + '<button class="primary full"' + (resaleReady ? '' : ' disabled') + '>Confirmar venda e separar lote</button></form>' : '<section class="panel"><p>Antes da primeira venda, cadastre a revendedora para manter o controle correto de prazo, contato e contas a receber.</p><button class="primary full" data-action="new-reseller">Cadastrar revendedora</button></section>') + '</section>';
     }
     const sales = resaleOrders();
     const open = sales.filter(order => order.status === 'confirmed').reduce((sum, order) => sum + n(order.total), 0);
@@ -1977,12 +1995,14 @@
       if (state.reportFilter.payment && row.payment !== state.reportFilter.payment) return false;
       if (state.reportFilter.status && row.status !== state.reportFilter.status) return false;
       if (state.reportFilter.location && row.location !== state.reportFilter.location) return false;
+      if (state.reportFilter.tag && !(row.tags || []).includes(state.reportFilter.tag)) return false;
       return !query || String(row.search || '').toLocaleLowerCase('pt-BR').includes(query);
     };
     let rows = [];
     if (kind === 'orders') rows = data.orders.map(order => {
       const location = orderDestination(order);
-      return { date: day(order.date), name: order.source === 'revenda' ? 'Revenda · ' + order.customer : order.customer, items: order.items.map(line => line.productName).join(', '), payment: order.paymentMethod, status: orderStatus(order), location, address: String(order.address || '').trim(), value: n(order.total), search: order.customer + ' ' + (order.source === 'revenda' ? 'revenda revendedora' : 'pedido cliente') + ' ' + location + ' ' + String(order.address || '') + ' ' + order.items.map(line => line.productName).join(' ') };
+      const tags = Array.isArray(order.tags) ? order.tags : [];
+      return { date: day(order.date), name: order.source === 'revenda' ? 'Revenda · ' + order.customer : order.customer, items: order.items.map(line => line.productName).join(', '), payment: order.paymentMethod, status: orderStatus(order), location, address: String(order.address || '').trim(), tags, value: n(order.total), search: order.customer + ' ' + (order.source === 'revenda' ? 'revenda revendedora' : 'pedido cliente') + ' ' + location + ' ' + String(order.address || '') + ' ' + tags.join(' ') + ' ' + order.items.map(line => line.productName).join(' ') };
     });
     if (kind === 'finance') {
       const opening = openingFinancial();
@@ -1995,11 +2015,25 @@
       data.supplies.forEach(item => item.movements.forEach(move => rows.push({ date: day(move.date), name: item.name, type: move.kind, quantity: n(move.quantity), unit: item.unit, payment: move.paymentMethod || '', status: '', value: n(move.total), search: item.name + ' ' + move.kind })));
       data.readyStock.forEach(item => item.movements.forEach(move => rows.push({ date: day(move.date), name: item.name, type: move.kind, quantity: n(move.quantity), unit: 'un.', payment: '', status: '', value: 0, search: item.name + ' ' + move.kind })));
     }
+    if (kind === 'production') {
+      const grouped = data.productions.reduce((all, item) => {
+        const month = String(item.date || '').slice(0, 7);
+        if (!month) return all;
+        if (!all[month]) all[month] = { date: month + '-01', name: month, type: 'Produção mensal', quantity: 0, unit: 'un.', value: 0, batches: 0, flavors: [] };
+        all[month].quantity += n(item.outputQuantity);
+        all[month].value += n(item.totalCost);
+        all[month].batches += n(item.batches);
+        all[month].flavors.push(item.recipeName + ' (' + qtyText(item.outputQuantity) + ' un.)');
+        return all;
+      }, {});
+      rows = Object.values(grouped).map(row => ({ ...row, name: new Date(row.date + 'T12:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }), search: row.name + ' ' + row.flavors.join(' ') }));
+    }
     return rows.filter(matches).sort((a, b) => String(b.date).localeCompare(String(a.date)));
   }
   function reportCard(row, kind) {
     if (kind === 'orders') return detail(row.name, brDate(row.date) + ' · ' + esc(row.payment), money(row.value), row.status, '<p>' + esc(row.items) + '</p><p><b>Entrega / retirada:</b> ' + esc(row.location) + (row.address ? '<br><b>Endereço:</b> ' + esc(row.address).replace(/\n/g, '<br>') : '') + '</p>');
     if (kind === 'finance') return detail(row.name, brDate(row.date) + ' · ' + esc(row.payment), (row.value < 0 ? '− ' : '+ ') + money(Math.abs(row.value)), row.type.toLocaleLowerCase('pt-BR'), '<p>' + esc(row.type) + '</p>');
+    if (kind === 'production') return detail(row.name, qtyText(row.quantity) + ' geladinho(s) · ' + qtyText(row.batches) + ' lote(s)', qtyText(row.quantity) + ' un.', 'produção', '<p><b>Custo registrado:</b> ' + money(row.value) + '</p><p>' + esc(row.flavors.join(' · ')) + '</p>');
     return detail(row.name, brDate(row.date) + ' · ' + esc(row.type), (row.quantity >= 0 ? '+ ' : '− ') + Math.abs(row.quantity) + ' ' + esc(row.unit), 'estoque', '<p>Valor lançado: ' + money(row.value) + '</p>');
   }
   function reportsScreen() {
@@ -2016,13 +2050,16 @@
       const outValue = rows.filter(row => row.value < 0).reduce((sum, row) => sum + Math.abs(row.value), 0);
       totalText = 'Entradas: <b>' + money(inValue) + '</b> · saídas: <b>' + money(outValue) + '</b>';
       headings = ['Data', 'Descrição', 'Tipo', 'Pagamento', 'Valor'];
+    } else if (kind === 'production') {
+      totalText = 'Produção no período: <b>' + qtyText(rows.reduce((sum, row) => sum + n(row.quantity), 0)) + ' geladinho(s)</b> · lotes: <b>' + qtyText(rows.reduce((sum, row) => sum + n(row.batches), 0)) + '</b>';
+      headings = ['Mês', 'Quantidade produzida', 'Lotes', 'Custo', 'Sabores'];
     } else {
       totalText = 'Movimentações: <b>' + rows.length + '</b>';
       headings = ['Data', 'Item', 'Movimento', 'Quantidade', 'Valor'];
     }
     state.exportRows = rows;
     state.exportHeadings = headings;
-    const title = kind === 'orders' ? 'Relatório de pedidos' : kind === 'finance' ? 'Relatório financeiro' : 'Relatório de estoque';
+    const title = kind === 'orders' ? 'Relatório de pedidos' : kind === 'finance' ? 'Relatório financeiro' : kind === 'production' ? 'Produção mensal' : 'Relatório de estoque';
     const rank = kind === 'orders' && state.reportRanking ? '<section class="panel ranking-panel"><h2>Sabores mais vendidos ' + (state.reportRanking === 'week' ? 'na semana' : state.reportRanking === 'month' ? 'no mês' : 'no geral') + '</h2>' + bestCard('Ranking', bestSellers(order => !state.reportFilter.start || day(order.paidAt || order.date) >= state.reportFilter.start), 'reports:orders:' + state.reportRanking) + '</section>' : '';
     const f = state.reportFilter;
     return '<section class="screen active">' + heading('Relatórios', title, 'Filtre por data, valor, cliente, sabor, pagamento ou situação e baixe o resultado em Excel.') + rank + '<div class="panel filters">' +
@@ -2032,6 +2069,7 @@
       field('Valor máximo', '<input data-filter="max" inputmode="decimal" value="' + esc(f.max) + '">') +
       field('Pagamento', '<select data-filter="payment"><option value="">Todos</option>' + METHODS.map(method => '<option' + (f.payment === method ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') +
       (kind === 'orders' ? field('Entrega / retirada', '<select data-filter="location"><option value="">Todos os locais</option>' + Array.from(new Set(data.orders.map(orderDestination))).sort((a, b) => a.localeCompare(b, 'pt-BR')).map(location => '<option value="' + esc(location) + '"' + (f.location === location ? ' selected' : '') + '>' + esc(location) + '</option>').join('') + '</select>') : '') +
+      (kind === 'orders' ? field('Tag', '<select data-filter="tag"><option value="">Todas as tags</option>' + Array.from(new Set(data.orders.flatMap(order => Array.isArray(order.tags) ? order.tags : []))).sort((a, b) => a.localeCompare(b, 'pt-BR')).map(tag => '<option value="' + esc(tag) + '"' + (f.tag === tag ? ' selected' : '') + '>' + esc(tag) + '</option>').join('') + '</select>') : '') +
       field('Situação', '<select data-filter="status"><option value="">Todas</option><option value="parcialmente reservado"' + (f.status === 'parcialmente reservado' ? ' selected' : '') + '>Parcialmente reservado</option><option value="encomenda programada"' + (f.status === 'encomenda programada' ? ' selected' : '') + '>Encomenda programada</option><option value="produção e reserva parcial"' + (f.status === 'produção e reserva parcial' ? ' selected' : '') + '>Produção e reserva parcial</option><option value="em produção"' + (f.status === 'em produção' ? ' selected' : '') + '>Em produção</option><option value="aguardando aprovação"' + (f.status === 'aguardando aprovação' ? ' selected' : '') + '>Aguardando aprovação</option><option value="aguardando pagamento"' + (f.status === 'aguardando pagamento' ? ' selected' : '') + '>Aguardando pagamento</option><option value="pago"' + (f.status === 'pago' ? ' selected' : '') + '>Pago</option><option value="cancelado"' + (f.status === 'cancelado' ? ' selected' : '') + '>Cancelado</option><option value="reserva expirada"' + (f.status === 'reserva expirada' ? ' selected' : '') + '>Reserva expirada</option></select>') +
       field('Buscar', '<input class="filter-search" data-filter="query" value="' + esc(f.query) + '" placeholder="Cliente, local, sabor, fornecedor...">') +
       '<button class="outline" type="button" data-action="clear-filter">Limpar</button><button class="secondary" type="button" data-action="export-xlsx">Baixar Excel</button></div><div class="panel report-summary">' + totalText + '</div><div class="list">' + (rows.map(row => reportCard(row, kind)).join('') || empty('Nenhum resultado encontrado.')) + '</div></section>';
@@ -2230,6 +2268,25 @@
     const rows = draft.zones.length ? draft.zones : [{ city: '', fee: '', deliveryCost: '', requiresThermasAddress: false }];
     return '<section class="delivery-zones"><h2>Locais, frete e custo da entrega</h2><p class="form-note">O frete é o valor que o cliente paga. O custo é o que a empresa paga ao entregador; deixe em branco se não houver custo fixo.</p>' + rows.map((row, index) => '<div class="delivery-zone-row" data-delivery-zone><label>Cidade ou bairro<input data-zone-city="' + index + '" value="' + esc(row.city) + '" placeholder="Ex.: Thermas ou Águas do Centro"></label><label>Frete cobrado (R$)<input data-zone-fee="' + index + '" inputmode="decimal" value="' + esc(row.fee) + '" placeholder="Ex.: 5,00"></label><label>Custo da entrega (R$)<input data-zone-cost="' + index + '" inputmode="decimal" value="' + esc(row.deliveryCost) + '" placeholder="Ex.: 3,00"></label><label class="zone-rule"><input type="checkbox" data-zone-thermas="' + index + '"' + (row.requiresThermasAddress ? ' checked' : '') + '> Pedir Gleba, quadra, lote, rua e nº</label><button class="line-remove" type="button" data-action="remove-delivery-zone" data-index="' + index + '" aria-label="Remover local">×</button></div>').join('') + '<button class="outline full" type="button" data-action="add-delivery-zone">+ Adicionar cidade ou bairro</button></section>';
   }
+  function catalogHoursMarkup() {
+    const labels = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+    const source = data.settings.catalogHours || {};
+    const rows = labels.map((label, index) => {
+      const current = source[index] || DEFAULT_SETTINGS.catalogHours[index];
+      return '<div class="catalog-hours-row"><label class="catalog-switch"><input type="checkbox" name="hours_' + index + '_enabled"' + (current.enabled ? ' checked' : '') + '><span>' + label + '</span></label><input type="time" name="hours_' + index + '_open" value="' + esc(current.open || '') + '" aria-label="Abertura de ' + esc(label) + '"><span>até</span><input type="time" name="hours_' + index + '_close" value="' + esc(current.close || '') + '" aria-label="Fechamento de ' + esc(label) + '"></div>';
+    }).join('');
+    return '<section class="panel nested-panel catalog-hours"><h2>Horários de atendimento</h2><p class="form-note">Fora destes horários o cliente vê o cardápio, mas não consegue enviar pedidos. Deixe um dia desmarcado para fechá-lo.</p>' + rows + '</section>';
+  }
+  function catalogHoursFromForm(form) {
+    const hours = {};
+    for (let index = 0; index < 7; index += 1) {
+      const enabled = Boolean(form.elements['hours_' + index + '_enabled']?.checked);
+      const open = String(form.elements['hours_' + index + '_open']?.value || '');
+      const close = String(form.elements['hours_' + index + '_close']?.value || '');
+      hours[index] = { enabled: enabled && /^\d{2}:\d{2}$/.test(open) && /^\d{2}:\d{2}$/.test(close) && open < close, open, close };
+    }
+    return hours;
+  }
   function settingsScreen() {
     const section = state.screen.replace('settings-', '');
     if (section === 'cloud') {
@@ -2297,6 +2354,7 @@
         field('Texto de apresentação', '<textarea name="catalogIntro" rows="3">' + esc(data.settings.catalogIntro || '') + '</textarea>', 'O cliente lê este texto ao abrir o cardápio.') +
         field('WhatsApp do botão flutuante', '<input name="catalogPhone" inputmode="tel" value="' + esc(data.settings.catalogPhone || '') + '" placeholder="Ex.: 5511999999999">', 'Aparece no canto inferior direito do cardápio do cliente. Informe com DDD; se não escrever 55, o sistema acrescenta o código do Brasil automaticamente.') +
         field('Endereço / instruções', '<textarea name="businessAddress" rows="3">' + esc(data.settings.businessAddress || '') + '</textarea>', 'Ex.: retirada no endereço, horário ou taxa de entrega.') +
+        catalogHoursMarkup() +
         '<section class="panel nested-panel"><h2>Encomendas agendadas</h2><p class="form-note">Ao receber uma encomenda, o sistema separa imediatamente os sabores que já existem no estoque. Só o saldo que falta entra na produção pendente.</p><label class="catalog-switch"><input name="scheduledEnabled" type="checkbox"' + (data.settings.scheduledEnabled !== false ? ' checked' : '') + '> Permitir encomendas no cardápio</label><div class="form-grid two">' + field('Prazo mínimo (dias)', '<input name="scheduledLeadDays" inputmode="numeric" value="' + esc(data.settings.scheduledLeadDays || '2') + '" placeholder="Ex.: 2">', 'O cliente só poderá escolher datas a partir deste número de dias. O mínimo do sistema é 2 dias.') + field('Limite por data (geladinhos)', '<input name="scheduledMaxItemsPerDay" inputmode="decimal" value="' + esc(data.settings.scheduledMaxItemsPerDay || '') + '" placeholder="Deixe em branco para não limitar">', 'Evita aceitar mais encomendas do que a produção comporta em um mesmo dia. Conta apenas o que ainda precisa ser produzido para a data.') + '</div></section>' +
         '<button class="primary full">Salvar informações do cardápio</button></form><section class="panel"><h2>Imagens leves para o cardápio</h2><p>Fotos e logos grandes aumentam o tráfego da nuvem. Esta ação diminui as imagens já cadastradas, sem mexer em estoque, pedidos ou valores.</p><button class="secondary full" type="button" data-action="optimize-catalog-images">Otimizar fotos e logos atuais</button>' + (hasMediaStorage() ? '<hr><h3>Mover imagens para o armazenamento econômico</h3><p class="form-note">Faz uma única migração das fotos e logos antigas. O sistema só remove a cópia antiga depois de conferir que a imagem abriu no novo armazenamento.</p><button class="primary full" type="button" data-action="migrate-catalog-media">Migrar fotos e logos agora</button><button class="outline full" type="button" data-action="recover-catalog-media">Recuperar fotos e logos da cópia segura</button><p class="form-note">Use a recuperação somente se alguma foto ou logo não aparecer. Ela busca apenas as imagens na cópia diária da nuvem; estoque, pedidos e financeiro não são alterados.</p>' : '') + '</section><section class="panel"><h2>Link para enviar ao cliente</h2><p>Pronta entrega mostra somente o que já foi produzido. Encomenda mostra os sabores ativos, pede uma data com o prazo mínimo e já separa o estoque que estiver pronto.</p><div class="customer-link"><input readonly value="' + esc(link) + '"><button class="secondary" type="button" data-action="copy-catalog-link">Copiar link</button></div><div class="button-row"><button class="outline" type="button" data-action="open-catalog-management">Abrir para conferir</button></div><p class="form-note">Use “Abrir para conferir” no celular de gestão: o botão “Voltar à gestão” aparecerá somente nessa abertura. O link copiado continua sendo a versão limpa para o cliente.</p><p class="form-note">Com a nuvem ativada, os pedidos entram diretamente no Controle de pedidos.</p></section></section>';
     }
@@ -2664,6 +2722,7 @@
         const saved = {
           customer,
           phone: f.phone.value.trim(),
+          tags: Array.from(new Set(String(f.tags?.value || '').split(',').map(tag => tag.trim()).filter(Boolean))).slice(0, 12),
           items: result.lines.map(line => ({ ...line, picked: false })),
           subtotal: result.revenue,
           grossSubtotal,
@@ -3236,6 +3295,7 @@
         scheduledEnabled: Boolean(f.scheduledEnabled.checked),
         scheduledLeadDays: String(leadDays),
         scheduledMaxItemsPerDay: maxItems > 0 ? String(maxItems) : '',
+        catalogHours: catalogHoursFromForm(form),
         catalogLogoDataUrl,
         catalogLogoUrl
       });
@@ -3893,6 +3953,8 @@
       ? [brDate(row.date), row.name, row.items, row.location, row.payment, row.status, row.value]
       : kind === 'finance'
         ? [brDate(row.date), row.name, row.type, row.payment, row.value]
+        : kind === 'production'
+          ? [row.name, row.quantity, row.batches, row.value, (row.flavors || []).join(' · ')]
         : [brDate(row.date), row.name, row.type, (row.quantity >= 0 ? '+ ' : '− ') + Math.abs(row.quantity) + ' ' + row.unit, row.value]);
     const all = [state.exportHeadings || [], ...contentRows];
     const cells = all.map((row, rowIndex) => '<row r="' + (rowIndex + 1) + '">' + row.map((value, column) => '<c r="' + String.fromCharCode(65 + column) + (rowIndex + 1) + '" t="' + (typeof value === 'number' ? 'n' : 'inlineStr') + '">' + (typeof value === 'number' ? '<v>' + value + '</v>' : '<is><t>' + xmlText(value) + '</t></is>') + '</c>').join('') + '</row>').join('');
@@ -4111,7 +4173,7 @@
     if (action === 'delete-supplier') { deleteSupplier(id); return; }
     if (action === 'edit-category') { state.editProductCategory = id; state.screen = 'category-edit'; render(); return; }
     if (action === 'delete-category') { deleteCategory(id); return; }
-    if (action === 'clear-filter') { state.reportFilter = { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '' }; render(); return; }
+    if (action === 'clear-filter') { state.reportFilter = { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '', tag: '' }; render(); return; }
     if (action === 'export-xlsx') { exportXlsx(); return; }
     if (action === 'optimize-catalog-images') { optimizeCatalogImages(); return; }
     if (action === 'migrate-catalog-media') { migrateCatalogMedia(); return; }
@@ -4214,6 +4276,7 @@
       if (order?.items[n(index)]) { order.items[n(index)].picked = target.checked; save(); }
       return;
     }
+    if (target.matches('[data-order-tag-filter]')) { state.orderTagFilter = target.value; render(); return; }
     if (target.matches('[data-filter]')) { state.reportFilter[target.dataset.filter] = target.value; render(); return; }
     if (target.id === 'productionRecipe') { state.productionRecipe = target.value; state.productionBatches = '1'; render(); return; }
     if (target.id === 'productionBatches') { state.productionBatches = target.value; render(); return; }
