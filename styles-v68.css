@@ -1,10 +1,19 @@
 /* Camada visual v68: painéis mais organizados e filtros inspirados na
    hierarquia do painel de compras, sem trocar a identidade Gelatos Lele. */
-.catalog-hours { display:grid; gap:10px; }
-.catalog-hours-row { display:grid; grid-template-columns:minmax(150px,1fr) 108px auto 108px; align-items:center; gap:8px; padding:10px 0; border-top:1px solid rgba(99,47,60,.11); }
-.catalog-hours-row:first-of-type { border-top:0; }
-.catalog-hours-row .catalog-switch { margin:0; }
-.catalog-hours-row input[type="time"] { min-width:0; }
+.catalog-availability { display:grid; gap:14px; }
+.catalog-calendar-legend { display:flex; gap:14px; flex-wrap:wrap; color:#755f65; font-size:.87rem; }
+.catalog-calendar-legend span { display:flex; align-items:center; gap:6px; }
+.catalog-calendar-legend i { width:12px; height:12px; border-radius:50%; border:1px solid #e5c9d0; background:#fff; }
+.catalog-calendar-legend i.selected { background:#d85e78; border-color:#d85e78; }
+.catalog-calendar-months { display:grid; gap:16px; grid-template-columns:repeat(3,minmax(0,1fr)); }
+.catalog-month { border:1px solid rgba(99,47,60,.13); border-radius:16px; padding:12px; background:#fffdfd; }
+.catalog-month h3 { margin:0 0 10px; text-transform:capitalize; color:#56313b; font-size:.96rem; }
+.catalog-calendar-weekdays, .catalog-calendar-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; text-align:center; }
+.catalog-calendar-weekdays { margin-bottom:5px; color:#9a777f; font-size:.69rem; font-weight:800; }
+.catalog-calendar-day, .catalog-calendar-blank { aspect-ratio:1; min-width:0; display:grid; place-items:center; border:1px solid transparent; border-radius:9px; background:transparent; color:#56313b; font-weight:700; font-size:.82rem; }
+.catalog-calendar-day { cursor:pointer; }
+.catalog-calendar-day.selected { background:#d85e78; color:#fff; box-shadow:0 5px 10px rgba(216,94,120,.25); }
+.catalog-calendar-day.today:not(.selected) { border-color:#d85e78; color:#b64561; }
 .compact-filter { margin-bottom:14px; display:flex; align-items:end; }
 .compact-filter label { display:grid; gap:6px; min-width:min(100%,320px); font-weight:700; color:#56313b; }
 .order-tags { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 12px; }
@@ -14,4 +23,4 @@
 .metric:active { transform:scale(.985); }
 .panel.filters { border-radius:20px; box-shadow:0 6px 22px rgba(74,37,51,.045); }
 @media (min-width:760px) { .panel.filters { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); align-items:end; } }
-@media (max-width:520px) { .catalog-hours-row { grid-template-columns:1fr 88px auto 88px; font-size:.84rem; } .catalog-hours-row .catalog-switch span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100px; } }
+@media (max-width:720px) { .catalog-calendar-months { grid-template-columns:1fr; } }

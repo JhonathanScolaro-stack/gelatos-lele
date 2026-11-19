@@ -153,6 +153,11 @@
   function scheduledEnabled() { return catalog?.scheduledEnabled !== false; }
   function scheduledLeadDays() { return Math.max(2, Math.min(30, Math.floor(num(catalog?.scheduledLeadDays || 2)))); }
   function catalogAvailability(now = new Date()) {
+    if (catalog?.catalogAvailabilityMode === 'calendar') {
+      const date = localDate(now);
+      const open = Array.isArray(catalog.catalogOpenDates) && catalog.catalogOpenDates.includes(date);
+      return open ? { open: true, label: 'Aberto hoje', detail: 'Escolha seus sabores e envie o pedido.' } : { open: false, label: 'Estamos produzindo', detail: 'Hoje o cardápio está fechado para novos pedidos.' };
+    }
     const day = now.getDay();
     const entry = catalog?.catalogHours?.[day] || catalog?.catalogHours?.[String(day)];
     // Empresas que já usavam o cardápio antes deste recurso ainda não têm a
@@ -168,6 +173,10 @@
   function availabilityBanner() {
     const status = catalogAvailability();
     return '<section class="catalog-open-status ' + (status.open ? 'is-open' : 'is-closed') + '"><span aria-hidden="true">' + (status.open ? '●' : '○') + '</span><div><b>' + esc(status.label) + '</b><small>' + esc(status.detail) + '</small></div></section>';
+  }
+  function productionPauseScreen() {
+    const logo = imageSource(CATALOG_LOGO_ID) || DEFAULT_CATALOG_LOGO;
+    return '<section class="catalog-pause"><div class="catalog-pause-glow"></div>' + managementBack() + '<img class="catalog-pause-logo" src="' + esc(logo) + '" alt="' + esc(catalog?.brand || 'Gelatos Lele') + '"><span class="catalog-pause-kicker">GELATOS LELE</span><h1>Estamos produzindo<br>coisas deliciosas.</h1><p>Hoje o cardápio está fechado para novos pedidos, porque estamos preparando os próximos sabores com todo cuidado.</p><section class="catalog-pause-note"><b>Quer deixar uma mensagem?</b><span>Chame a gente no WhatsApp e teremos prazer em ajudar.</span></section></section>' + catalogCredit() + customerWhatsAppButton();
   }
   function localDate(value = new Date()) {
     const date = value instanceof Date ? value : new Date(value + 'T12:00:00');
@@ -385,6 +394,7 @@
     return '<form id="customerOrder" class="panel checkout checkout-review"><h2>Confira seu pedido</h2><p class="small">' + orderDescription + '</p>' + cartLines(result) + '<dl class="review-details"><dt>Cliente</dt><dd>' + esc(draft.customer) + '</dd><dt>WhatsApp</dt><dd>' + esc(draft.phone) + '</dd>' + scheduling + '<dt>Recebimento</dt><dd>' + esc(draft.mode) + '</dd><dt>Local</dt><dd>' + esc(deliveryText) + '</dd><dt>Endereço</dt><dd>' + esc(addressText).replace(/\n/g, '<br>') + '</dd><dt>Pagamento</dt><dd>' + esc(draft.payment) + '</dd></dl>' + totalsMarkup(result) + '<div class="checkout-actions"><button type="button" class="outline" data-action="edit-checkout">Editar pedido</button><button class="primary">Enviar pedido</button></div></form>';
   }
   function render() {
+    if (catalog?.catalogAvailabilityMode === 'calendar' && !catalogIsOpen()) { root.innerHTML = productionPauseScreen(); return; }
     const result = orderTotals();
     const zones = deliveryZones();
     const modes = availableModes();

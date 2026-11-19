@@ -146,6 +146,8 @@
     scheduledEnabled: true,
     scheduledLeadDays: '2',
     scheduledMaxItemsPerDay: '',
+    catalogAvailabilityMode: 'legacy',
+    catalogOpenDates: [],
     // 0 = domingo ... 6 = sábado. Vazio significa fechado naquele dia.
     catalogHours: {
       0: { enabled: false, open: '', close: '' },
@@ -2268,24 +2270,27 @@
     const rows = draft.zones.length ? draft.zones : [{ city: '', fee: '', deliveryCost: '', requiresThermasAddress: false }];
     return '<section class="delivery-zones"><h2>Locais, frete e custo da entrega</h2><p class="form-note">O frete é o valor que o cliente paga. O custo é o que a empresa paga ao entregador; deixe em branco se não houver custo fixo.</p>' + rows.map((row, index) => '<div class="delivery-zone-row" data-delivery-zone><label>Cidade ou bairro<input data-zone-city="' + index + '" value="' + esc(row.city) + '" placeholder="Ex.: Thermas ou Águas do Centro"></label><label>Frete cobrado (R$)<input data-zone-fee="' + index + '" inputmode="decimal" value="' + esc(row.fee) + '" placeholder="Ex.: 5,00"></label><label>Custo da entrega (R$)<input data-zone-cost="' + index + '" inputmode="decimal" value="' + esc(row.deliveryCost) + '" placeholder="Ex.: 3,00"></label><label class="zone-rule"><input type="checkbox" data-zone-thermas="' + index + '"' + (row.requiresThermasAddress ? ' checked' : '') + '> Pedir Gleba, quadra, lote, rua e nº</label><button class="line-remove" type="button" data-action="remove-delivery-zone" data-index="' + index + '" aria-label="Remover local">×</button></div>').join('') + '<button class="outline full" type="button" data-action="add-delivery-zone">+ Adicionar cidade ou bairro</button></section>';
   }
-  function catalogHoursMarkup() {
-    const labels = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
-    const source = data.settings.catalogHours || {};
-    const rows = labels.map((label, index) => {
-      const current = source[index] || DEFAULT_SETTINGS.catalogHours[index];
-      return '<div class="catalog-hours-row"><label class="catalog-switch"><input type="checkbox" name="hours_' + index + '_enabled"' + (current.enabled ? ' checked' : '') + '><span>' + label + '</span></label><input type="time" name="hours_' + index + '_open" value="' + esc(current.open || '') + '" aria-label="Abertura de ' + esc(label) + '"><span>até</span><input type="time" name="hours_' + index + '_close" value="' + esc(current.close || '') + '" aria-label="Fechamento de ' + esc(label) + '"></div>';
+  function catalogDateKey(date) { return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0'); }
+  function catalogAvailabilityCalendar() {
+    const selected = new Set(Array.isArray(data.settings.catalogOpenDates) ? data.settings.catalogOpenDates : []);
+    const weekdays = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const month = new Date();
+    month.setHours(12, 0, 0, 0);
+    const calendars = [0, 1, 2].map(offset => {
+      const cursor = new Date(month.getFullYear(), month.getMonth() + offset, 1, 12);
+      const first = cursor.getDay();
+      const days = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+      const blanks = Array.from({ length: first }, () => '<span class="catalog-calendar-blank"></span>').join('');
+      const entries = Array.from({ length: days }, (_, index) => {
+        const date = new Date(cursor.getFullYear(), cursor.getMonth(), index + 1, 12);
+        const key = catalogDateKey(date);
+        const active = selected.has(key);
+        const todayDate = key === today();
+        return '<button type="button" class="catalog-calendar-day' + (active ? ' selected' : '') + (todayDate ? ' today' : '') + '" data-action="toggle-catalog-date" data-date="' + key + '" aria-pressed="' + active + '" aria-label="' + brDate(key) + '">' + (index + 1) + '</button>';
+      }).join('');
+      return '<section class="catalog-month"><h3>' + cursor.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) + '</h3><div class="catalog-calendar-weekdays">' + weekdays.map(label => '<span>' + label + '</span>').join('') + '</div><div class="catalog-calendar-grid">' + blanks + entries + '</div></section>';
     }).join('');
-    return '<section class="panel nested-panel catalog-hours"><h2>Horários de atendimento</h2><p class="form-note">Fora destes horários o cliente vê o cardápio, mas não consegue enviar pedidos. Deixe um dia desmarcado para fechá-lo.</p>' + rows + '</section>';
-  }
-  function catalogHoursFromForm(form) {
-    const hours = {};
-    for (let index = 0; index < 7; index += 1) {
-      const enabled = Boolean(form.elements['hours_' + index + '_enabled']?.checked);
-      const open = String(form.elements['hours_' + index + '_open']?.value || '');
-      const close = String(form.elements['hours_' + index + '_close']?.value || '');
-      hours[index] = { enabled: enabled && /^\d{2}:\d{2}$/.test(open) && /^\d{2}:\d{2}$/.test(close) && open < close, open, close };
-    }
-    return hours;
+    return '<section class="panel nested-panel catalog-availability"><h2>Dias abertos para pedidos</h2><p class="form-note">Toque em cada data que o cardápio poderá receber pedidos. Datas sem marcação exibem uma mensagem bonita de produção, sem mostrar valores ou carrinho.</p><input type="hidden" name="catalogOpenDates" value="' + esc(Array.from(selected).sort().join(',')) + '"><div class="catalog-calendar-legend"><span><i class="selected"></i> aberto para pedidos</span><span><i></i> em produção / fechado</span></div><div class="catalog-calendar-months">' + calendars + '</div></section>';
   }
   function settingsScreen() {
     const section = state.screen.replace('settings-', '');
@@ -2354,7 +2359,7 @@
         field('Texto de apresentação', '<textarea name="catalogIntro" rows="3">' + esc(data.settings.catalogIntro || '') + '</textarea>', 'O cliente lê este texto ao abrir o cardápio.') +
         field('WhatsApp do botão flutuante', '<input name="catalogPhone" inputmode="tel" value="' + esc(data.settings.catalogPhone || '') + '" placeholder="Ex.: 5511999999999">', 'Aparece no canto inferior direito do cardápio do cliente. Informe com DDD; se não escrever 55, o sistema acrescenta o código do Brasil automaticamente.') +
         field('Endereço / instruções', '<textarea name="businessAddress" rows="3">' + esc(data.settings.businessAddress || '') + '</textarea>', 'Ex.: retirada no endereço, horário ou taxa de entrega.') +
-        catalogHoursMarkup() +
+        catalogAvailabilityCalendar() +
         '<section class="panel nested-panel"><h2>Encomendas agendadas</h2><p class="form-note">Ao receber uma encomenda, o sistema separa imediatamente os sabores que já existem no estoque. Só o saldo que falta entra na produção pendente.</p><label class="catalog-switch"><input name="scheduledEnabled" type="checkbox"' + (data.settings.scheduledEnabled !== false ? ' checked' : '') + '> Permitir encomendas no cardápio</label><div class="form-grid two">' + field('Prazo mínimo (dias)', '<input name="scheduledLeadDays" inputmode="numeric" value="' + esc(data.settings.scheduledLeadDays || '2') + '" placeholder="Ex.: 2">', 'O cliente só poderá escolher datas a partir deste número de dias. O mínimo do sistema é 2 dias.') + field('Limite por data (geladinhos)', '<input name="scheduledMaxItemsPerDay" inputmode="decimal" value="' + esc(data.settings.scheduledMaxItemsPerDay || '') + '" placeholder="Deixe em branco para não limitar">', 'Evita aceitar mais encomendas do que a produção comporta em um mesmo dia. Conta apenas o que ainda precisa ser produzido para a data.') + '</div></section>' +
         '<button class="primary full">Salvar informações do cardápio</button></form><section class="panel"><h2>Imagens leves para o cardápio</h2><p>Fotos e logos grandes aumentam o tráfego da nuvem. Esta ação diminui as imagens já cadastradas, sem mexer em estoque, pedidos ou valores.</p><button class="secondary full" type="button" data-action="optimize-catalog-images">Otimizar fotos e logos atuais</button>' + (hasMediaStorage() ? '<hr><h3>Mover imagens para o armazenamento econômico</h3><p class="form-note">Faz uma única migração das fotos e logos antigas. O sistema só remove a cópia antiga depois de conferir que a imagem abriu no novo armazenamento.</p><button class="primary full" type="button" data-action="migrate-catalog-media">Migrar fotos e logos agora</button><button class="outline full" type="button" data-action="recover-catalog-media">Recuperar fotos e logos da cópia segura</button><p class="form-note">Use a recuperação somente se alguma foto ou logo não aparecer. Ela busca apenas as imagens na cópia diária da nuvem; estoque, pedidos e financeiro não são alterados.</p>' : '') + '</section><section class="panel"><h2>Link para enviar ao cliente</h2><p>Pronta entrega mostra somente o que já foi produzido. Encomenda mostra os sabores ativos, pede uma data com o prazo mínimo e já separa o estoque que estiver pronto.</p><div class="customer-link"><input readonly value="' + esc(link) + '"><button class="secondary" type="button" data-action="copy-catalog-link">Copiar link</button></div><div class="button-row"><button class="outline" type="button" data-action="open-catalog-management">Abrir para conferir</button></div><p class="form-note">Use “Abrir para conferir” no celular de gestão: o botão “Voltar à gestão” aparecerá somente nessa abertura. O link copiado continua sendo a versão limpa para o cliente.</p><p class="form-note">Com a nuvem ativada, os pedidos entram diretamente no Controle de pedidos.</p></section></section>';
     }
@@ -3295,7 +3300,8 @@
         scheduledEnabled: Boolean(f.scheduledEnabled.checked),
         scheduledLeadDays: String(leadDays),
         scheduledMaxItemsPerDay: maxItems > 0 ? String(maxItems) : '',
-        catalogHours: catalogHoursFromForm(form),
+        catalogAvailabilityMode: 'calendar',
+        catalogOpenDates: Array.from(new Set(String(f.catalogOpenDates?.value || '').split(',').filter(value => /^\d{4}-\d{2}-\d{2}$/.test(value)))).sort(),
         catalogLogoDataUrl,
         catalogLogoUrl
       });
@@ -4062,6 +4068,19 @@
     }
     if (action === 'info') { state.info = { title: actionNode.dataset.infoTitle || 'Informação', text: actionNode.dataset.infoText || '' }; render(); return; }
     if (action === 'close-info') { state.info = null; render(); return; }
+    if (action === 'toggle-catalog-date') {
+      const form = $('#catalogSettingsForm');
+      const input = form?.elements?.catalogOpenDates;
+      if (!input) return;
+      const selected = new Set(String(input.value || '').split(',').filter(Boolean));
+      const date = String(actionNode.dataset.date || '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+      if (selected.has(date)) selected.delete(date); else selected.add(date);
+      input.value = Array.from(selected).sort().join(',');
+      actionNode.classList.toggle('selected', selected.has(date));
+      actionNode.setAttribute('aria-pressed', String(selected.has(date)));
+      return;
+    }
     if (action === 'add-delivery-zone') {
       state.deliveryDraft = deliveryDraftFromForm($('#deliverySettingsForm'));
       state.deliveryDraft.zones.push({ city: '', fee: '', deliveryCost: '', requiresThermasAddress: false });

@@ -300,7 +300,7 @@ function catalogFromState(state, env) {
   const logoUrl = asText(settings.catalogLogoUrl) || asText(settings.headerLogoUrl);
   const logoData = asText(settings.catalogLogoDataUrl) || asText(settings.headerLogoDataUrl);
   return {
-    store: storeSlug(env), brand: asText(settings.catalogName) || 'Gelatos Lele', intro: String(settings.catalogIntro || ''), phone: String(settings.catalogPhone || ''), address: String(settings.businessAddress || ''), pickupAddress: String(settings.pickupAddress || ''), deliveryModes: String(settings.deliveryModes || 'Retirada,Entrega'), deliveryZones: deliveryZones(settings), freeDeliveryMinValue: Math.max(0, numberOf(settings.freeDeliveryMinValue)), freeDeliveryMinItems: Math.max(0, numberOf(settings.freeDeliveryMinItems)), scheduledEnabled: settings.scheduledEnabled !== false && String(settings.scheduledEnabled).toLocaleLowerCase('pt-BR') !== 'false', scheduledLeadDays: Math.max(2, Math.min(30, Math.floor(numberOf(settings.scheduledLeadDays) || 2))), scheduledMaxItemsPerDay: Math.max(0, quantity(settings.scheduledMaxItemsPerDay)), catalogHours: settings.catalogHours && typeof settings.catalogHours === 'object' ? settings.catalogHours : {},
+    store: storeSlug(env), brand: asText(settings.catalogName) || 'Gelatos Lele', intro: String(settings.catalogIntro || ''), phone: String(settings.catalogPhone || ''), address: String(settings.businessAddress || ''), pickupAddress: String(settings.pickupAddress || ''), deliveryModes: String(settings.deliveryModes || 'Retirada,Entrega'), deliveryZones: deliveryZones(settings), freeDeliveryMinValue: Math.max(0, numberOf(settings.freeDeliveryMinValue)), freeDeliveryMinItems: Math.max(0, numberOf(settings.freeDeliveryMinItems)), scheduledEnabled: settings.scheduledEnabled !== false && String(settings.scheduledEnabled).toLocaleLowerCase('pt-BR') !== 'false', scheduledLeadDays: Math.max(2, Math.min(30, Math.floor(numberOf(settings.scheduledLeadDays) || 2))), scheduledMaxItemsPerDay: Math.max(0, quantity(settings.scheduledMaxItemsPerDay)), catalogAvailabilityMode: settings.catalogAvailabilityMode === 'calendar' ? 'calendar' : 'legacy', catalogOpenDates: Array.isArray(settings.catalogOpenDates) ? settings.catalogOpenDates.filter(value => /^\d{4}-\d{2}-\d{2}$/.test(String(value))) : [],
     logoUrl, logo: '', hasLogo: Boolean(logoUrl || logoData), logoToken: logoUrl || logoData ? awaitableToken(logoUrl || logoData) : '', categories: productCategories(state), products
   };
 }
@@ -370,14 +370,9 @@ function makeOrder(state, payload) {
   const customer = asText(payload.customer);
   if (requestId.length < 8 || clientId.length < 16 || !customer) throw new Error('Não foi possível validar este pedido. Atualize o cardápio e tente novamente.');
   const settings = state.settings || {};
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date());
-  const part = type => parts.find(item => item.type === type)?.value || '';
-  const weekday = ({ Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 })[part('weekday')];
-  const hours = settings.catalogHours && typeof settings.catalogHours === 'object' ? settings.catalogHours : null;
-  if (hours) {
-    const slot = hours[weekday] || hours[String(weekday)];
-    const current = part('hour') + ':' + part('minute');
-    if (!slot?.enabled || !/^\d{2}:\d{2}$/.test(String(slot.open || '')) || !/^\d{2}:\d{2}$/.test(String(slot.close || '')) || current < slot.open || current >= slot.close) throw new Error('O cardápio está fechado para pedidos neste horário. Confira o atendimento informado no topo.');
+  if (settings.catalogAvailabilityMode === 'calendar') {
+    const openDates = Array.isArray(settings.catalogOpenDates) ? settings.catalogOpenDates.map(String) : [];
+    if (!openDates.includes(brazilDate())) throw new Error('Hoje o cardápio está fechado para produção. Fale com a Gelatos Lele pelo WhatsApp caso precise de ajuda.');
   }
   const scheduled = payload.orderKind === 'scheduled';
   const today = brazilDate();

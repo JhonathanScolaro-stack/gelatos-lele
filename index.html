@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="styles-v60.css?v=60">
   <link rel="stylesheet" href="styles-v61.css?v=61">
   <link rel="stylesheet" href="styles-v67.css?v=75">
-  <link rel="stylesheet" href="styles-v68.css?v=77">
+  <link rel="stylesheet" href="styles-v68.css?v=78">
   <title>Gelatos Lele — Gestão</title>
 </head>
 <body>
@@ -28,11 +28,11 @@
     // do sistema. No navegador, o PWA continua com o mesmo comportamento.
     if (!window.Capacitor?.isNativePlatform?.() && 'serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('./service-worker.js?v=77').then(function (registration) {
+        navigator.serviceWorker.register('./service-worker.js?v=78').then(function (registration) {
           registration.update().catch(function () {});
           navigator.serviceWorker.addEventListener('controllerchange', function () {
-            if (sessionStorage.getItem('gelatos-app-reloaded-v77')) return;
-            sessionStorage.setItem('gelatos-app-reloaded-v77', '1');
+            if (sessionStorage.getItem('gelatos-app-reloaded-v78')) return;
+            sessionStorage.setItem('gelatos-app-reloaded-v78', '1');
             window.location.reload();
           }, { once: true });
         }).catch(function () {});
@@ -42,6 +42,6 @@
   <script src="business-core.js?v=62"></script>
   <script src="cloud-config.js?v=62"></script>
   <script src="cloud-sync.js?v=75"></script>
-  <script src="app-v18.js?v=77"></script>
+  <script src="app-v18.js?v=78"></script>
 </body>
 </html>
