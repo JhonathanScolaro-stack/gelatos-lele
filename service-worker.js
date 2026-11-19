@@ -1,4 +1,4 @@
-const CACHE = 'gelatos-lele-company-v78-calendar-access';
+const CACHE = 'gelatos-lele-company-v79-order-tags';
 const ASSETS = [
   './',
   './index.html',

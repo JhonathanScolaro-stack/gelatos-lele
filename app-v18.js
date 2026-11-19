@@ -207,7 +207,7 @@
   const blankData = () => ({
     version: 18,
     supplies: [], recipes: [], productions: [], readyStock: [], orders: [], expenses: [],
-    suppliers: [], purchases: [], resellers: [], productCategories: defaultProductCategories(), notifications: [], notificationKeys: [], openingFinancial: defaultOpeningFinancial(), settings: { ...DEFAULT_SETTINGS }
+    suppliers: [], purchases: [], resellers: [], productCategories: defaultProductCategories(), orderTags: [], notifications: [], notificationKeys: [], openingFinancial: defaultOpeningFinancial(), settings: { ...DEFAULT_SETTINGS }
   });
   function normalize(raw) {
     const old = raw && typeof raw === 'object' ? raw : {};
@@ -236,6 +236,7 @@
     return {
       ...blankData(), ...old,
       productCategories,
+      orderTags: Array.isArray(old.orderTags) ? old.orderTags.map(item => ({ id: item.id || uid(), name: String(item.name || '').trim(), active: item.active !== false })).filter(item => item.name) : Array.from(new Set((old.orders || []).flatMap(order => Array.isArray(order.tags) ? order.tags : []))).map(name => ({ id: uid(), name: String(name), active: true })),
       supplies: Array.isArray(old.supplies) ? old.supplies.map(item => ({
         ...item,
         category: item.category === 'supply' ? 'supply' : 'ingredient',
@@ -386,7 +387,7 @@
       'category-edit': 'records-categories'
     };
     const screen = fallback[String(value || '')] || String(value || '');
-    return /^(home|orders-(new|history|calendar)|stock-(purchase|ingredient|supply|ready)|recipes|production|finance-(overview|receivable|payable|opening|opening-receive|opening-pay)|reports-(orders|finance|stock|production)|records-(catalog|suppliers|categories)|resale-(dashboard|new|history|people)|tools-(compare|capacity)|settings-(home|cloud|team|notifications|appearance|message|catalog|delivery|backup|restore-preview))$/.test(screen) ? screen : 'home';
+    return /^(home|orders-(new|history|calendar)|stock-(purchase|ingredient|supply|ready)|recipes|production|finance-(overview|receivable|payable|opening|opening-receive|opening-pay)|reports-(orders|finance|stock|production)|records-(catalog|suppliers|categories|tags)|resale-(dashboard|new|history|people)|tools-(compare|capacity)|settings-(home|cloud|team|notifications|appearance|message|catalog|delivery|backup|restore-preview))$/.test(screen) ? screen : 'home';
   }
   function loadLastScreen() {
     try { return resumableScreen(localStorage.getItem(LAST_SCREEN_KEY)); }
@@ -1078,7 +1079,7 @@
       navGroup('Revendas', 'resale', [['Visão das revendas', 'resale:dashboard', 'resale'], ['Nova venda para revenda', 'resale:new', 'plus'], ['Vendas para revenda', 'resale:history', 'orders'], ['Cadastro de revendedores', 'resale:people', 'people']], 'resale') +
       navGroup('Financeiro', 'finance', [['Visão financeira', 'finance:overview', 'finance'], ['Contas a receber', 'finance:receivable', 'price'], ['Contas pagas', 'finance:payable', 'finance'], ['Fechamento inicial', 'finance:opening', 'report']], 'finance') +
       navGroup('Relatórios', 'reports', [['Pedidos', 'reports:orders', 'orders'], ['Financeiro', 'reports:finance', 'finance'], ['Estoque', 'reports:stock', 'stock'], ['Produção mensal', 'reports:production', 'production']], 'report') +
-      navGroup('Cadastros', 'records', [['Cadastrar compra', 'stock:purchase', 'cart'], ['Cardápio / sabores', 'records:catalog', 'tag'], ['Categorias de geladinhos', 'records:categories', 'records'], ['Ingredientes', 'stock:ingredient', 'recipe'], ['Insumos', 'stock:supply', 'stock'], ['Fornecedores', 'records:suppliers', 'people'], ['Nova receita', 'recipes', 'recipe']], 'records') +
+      navGroup('Cadastros', 'records', [['Cadastrar compra', 'stock:purchase', 'cart'], ['Cardápio / sabores', 'records:catalog', 'tag'], ['Categorias de geladinhos', 'records:categories', 'records'], ['Tags de pedidos', 'records:tags', 'tag'], ['Ingredientes', 'stock:ingredient', 'recipe'], ['Insumos', 'stock:supply', 'stock'], ['Fornecedores', 'records:suppliers', 'people'], ['Nova receita', 'recipes', 'recipe']], 'records') +
       navGroup('Ferramentas', 'tools', [['Preços e compras', 'tools:compare', 'price'], ['Produção possível', 'tools:capacity', 'capacity']], 'tools') +
       navGroup('Configurações', 'settings', [['Visão geral', 'settings:home', 'settings'], ['Nuvem e sincronização', 'settings:cloud', 'cloud'], ['Notificações de pedidos', 'settings:notifications', 'bell'], ['Logo do app', 'settings:appearance', 'image'], ['Mensagem e Pix', 'settings:message', 'message'], ['Cardápio do cliente', 'settings:catalog', 'cart'], ['Frete e entrega', 'settings:delivery', 'delivery'], ['Backup', 'settings:backup', 'backup']], 'settings') +
       '</nav></aside><main class="screen-' + esc(state.screen) + '">' + inAppBackButton() + screen() + '</main>' + poweredFooter() + noticesPanel() + infoPanel() + '</div><div id="toast" role="status" aria-live="polite"></div>';
@@ -1133,6 +1134,7 @@
     if (state.screen.startsWith('reports-')) return reportsScreen();
     if (state.screen === 'records-catalog') return catalogScreen();
     if (state.screen === 'records-categories') return categoryScreen();
+    if (state.screen === 'records-tags') return orderTagsScreen();
     if (state.screen === 'category-edit') return categoryEditScreen();
     if (state.screen === 'records-suppliers') return supplierScreen();
     if (state.screen === 'supplier-edit') return supplierEditScreen();
@@ -1521,6 +1523,7 @@
       return '<section class="screen active">' + heading('Controle de pedidos', 'Pedidos realizados', 'Acompanhe encomendas, produção, reservas, pagamento e separação. Use tags para separar regiões, rotas ou prioridades.') + '<section class="panel compact-filter"><label>Filtrar por tag<select data-order-tag-filter><option value="">Todas as tags</option>' + tags.map(tag => '<option value="' + esc(tag) + '"' + (tag === selectedTag ? ' selected' : '') + '>' + esc(tag) + '</option>').join('') + '</select></label></section><div class="list">' + cards + '</div></section>';
     }
     const draft = { customer: '', phone: '', tags: '', payment: 'Pix', date: today(), dueDate: today(), orderKind: 'ready', scheduledFor: scheduledMinDate(), deliveryMode: defaultOrderDeliveryMode(), zoneId: '', address: '', ...(state.orderDraft || {}) };
+    const tagOptions = (data.orderTags || []).filter(tag => tag.active !== false).map(tag => '<option value="' + esc(tag.name) + '"></option>').join('');
     const scheduled = draft.orderKind === 'scheduled';
     const dateField = scheduled
       ? field('Data desejada para a encomenda', '<input name="scheduledFor" required type="date" min="' + scheduledMinDate() + '" value="' + esc(draft.scheduledFor || scheduledMinDate()) + '">', 'A data precisa ter pelo menos ' + scheduledLeadDays() + ' dias para o preparo.')
@@ -1529,7 +1532,7 @@
     return '<section class="screen active">' + heading('Controle de pedidos', 'Novo pedido', 'Registre uma venda feita por telefone, WhatsApp ou presencialmente — inclusive encomendas de clientes que não usam o link.') + '<form id="orderForm" class="panel form-panel"><input type="hidden" name="orderKind" value="' + (scheduled ? 'scheduled' : 'ready') + '"><h2>Dados do cliente</h2><div class="form-grid two">' +
       field('Nome do cliente', '<input name="customer" required value="' + esc(draft.customer) + '" placeholder="Ex.: Maria">') +
       field('WhatsApp', '<input name="phone" inputmode="tel" value="' + esc(draft.phone) + '" placeholder="Ex.: 11999999999">') +
-      field('Tags do pedido', '<input name="tags" value="' + esc(draft.tags || '') + '" placeholder="Ex.: Jundiaí, rota sexta">', 'Separe tags por vírgula. Elas ajudam a filtrar e organizar a separação.') +
+      field('Tags do pedido', '<input name="tags" list="orderTagSuggestions" value="' + esc(draft.tags || '') + '" placeholder="Ex.: Jundiaí, rota sexta"><datalist id="orderTagSuggestions">' + tagOptions + '</datalist>', 'Cadastre as opções em Cadastros › Tags de pedidos. Separe mais de uma por vírgula.') +
       '</div>' + orderTypeChooser(draft) + '<div class="section-line"><div><h3>Itens do pedido</h3><p>' + itemText + '</p></div></div><div class="line-list">' + orderLinesMarkup() + '</div><button type="button" class="outline full" data-action="add-order-line">+ Adicionar outro geladinho</button><div class="form-grid two">' +
       field('Forma de pagamento', '<select name="payment">' + METHODS.map(method => '<option' + (draft.payment === method ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') +
       dateField +
@@ -1542,13 +1545,14 @@
     const matchingZone = deliveryZones(data.settings.deliveryZones).find(zone => zone.name === String(order.deliveryZone || ''));
     const draft = { customer: order.customer, phone: order.phone || '', tags: (order.tags || []).join(', '), payment: order.paymentMethod, date: order.date, dueDate: order.dueDate, orderKind: order.orderKind, scheduledFor: order.scheduledFor || order.dueDate, deliveryMode: order.deliveryMode || order.mode || defaultOrderDeliveryMode(), zoneId: order.zoneId || matchingZone?.id || '', address: order.address || '', ...(state.orderDraft || {}) };
     const scheduled = order.orderKind === 'scheduled';
+    const tagOptions = (data.orderTags || []).filter(tag => tag.active !== false).map(tag => '<option value="' + esc(tag.name) + '"></option>').join('');
     const dateField = scheduled
       ? field('Data programada', '<input name="scheduledFor" required type="date" value="' + esc(draft.scheduledFor || order.scheduledFor || order.dueDate) + '">', 'Ao mudar a data, o sistema aplica o prazo mínimo atual e verifica a capacidade do dia.')
       : field('Vencimento', '<input name="dueDate" type="date" value="' + esc(draft.dueDate || order.dueDate) + '">');
     return '<section class="screen active">' + heading('Controle de pedidos', 'Editar pedido', scheduled ? 'Ao salvar, o app devolve a reserva anterior, recalcula a divisão por sabor e volta a separar automaticamente o que já estiver pronto.' : 'As quantidades, o total, custo e reserva do estoque são recalculados ao salvar.') + '<form id="orderEditForm" class="panel form-panel"><input type="hidden" name="id" value="' + esc(order.id) + '"><input type="hidden" name="orderKind" value="' + esc(order.orderKind) + '">' + orderTypeChooser(draft, true) + '<div class="form-grid two">' +
       field('Nome do cliente', '<input name="customer" required value="' + esc(draft.customer) + '">') +
       field('WhatsApp', '<input name="phone" inputmode="tel" value="' + esc(draft.phone) + '">') +
-      field('Tags do pedido', '<input name="tags" value="' + esc(draft.tags || '') + '" placeholder="Ex.: Jundiaí, rota sexta">', 'Separe tags por vírgula.') +
+      field('Tags do pedido', '<input name="tags" list="orderTagSuggestions" value="' + esc(draft.tags || '') + '" placeholder="Ex.: Jundiaí, rota sexta"><datalist id="orderTagSuggestions">' + tagOptions + '</datalist>', 'Cadastre as opções em Cadastros › Tags de pedidos.') +
       field('Forma de pagamento', '<select name="payment">' + METHODS.map(method => '<option' + (draft.payment === method ? ' selected' : '') + '>' + method + '</option>').join('') + '</select>') +
       dateField +
       field('Data do pedido', '<input name="date" type="date" value="' + esc(draft.date) + '">') +
@@ -2135,6 +2139,14 @@
     const recipes = data.recipes.filter(recipe => categoryFor(recipe).id === category.id);
     const usedBy = recipes.length;
     return '<section class="screen active">' + heading('Cadastros', 'Editar categoria', 'O novo nome aparece nas receitas e no cardápio, sem alterar custos ou estoque.') + '<form id="categoryEditForm" class="panel form-panel"><input type="hidden" name="id" value="' + esc(category.id) + '">' + field('Nome da categoria', '<input name="name" required value="' + esc(category.name) + '">') + '<p class="form-note">Esta categoria está sendo usada por ' + usedBy + (usedBy === 1 ? ' receita.' : ' receitas.') + '</p><div class="button-row"><button class="primary">Salvar alterações</button><button class="outline" type="button" data-route="records:categories">Cancelar</button><button class="outline danger-button" type="button" data-action="delete-category" data-id="' + esc(category.id) + '">Excluir categoria</button></div></form><section class="panel category-members-panel">' + categoryRecipesMarkup(category, recipes) + '</section></section>';
+  }
+  function orderTagsScreen() {
+    const tags = (data.orderTags || []).slice().sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+    const cards = tags.map(tag => {
+      const usage = data.orders.filter(order => (order.tags || []).includes(tag.name)).length;
+      return detail(tag.name, usage + (usage === 1 ? ' pedido usa esta tag.' : ' pedidos usam esta tag.'), '', tag.active === false ? 'inativa' : 'ativa', '<div class="details-actions"><button class="outline" data-action="toggle-order-tag" data-id="' + esc(tag.id) + '">' + (tag.active === false ? 'Ativar' : 'Desativar') + '</button><button class="outline danger-button" data-action="delete-order-tag" data-id="' + esc(tag.id) + '">Excluir</button></div>');
+    }).join('') || empty('Cadastre tags como cidades, rotas ou prioridades. Ex.: Jundiaí, Thermas ou rota sexta.');
+    return '<section class="screen active">' + heading('Cadastros', 'Tags de pedidos', 'Crie as etiquetas que a equipe usa para organizar pedidos, entregas e relatórios.') + '<form id="orderTagForm" class="panel form-panel"><div class="form-grid two">' + field('Nome da tag', '<input name="name" required placeholder="Ex.: Jundiaí">', 'Depois ela aparece como sugestão em Novo pedido e nos filtros.') + '</div><button class="primary full">Cadastrar tag</button></form><div class="list">' + cards + '</div></section>';
   }
   function supplierScreen() {
     const cards = data.suppliers.slice().sort((a, b) => a.name.localeCompare(b.name)).map(item => detail(item.name, esc(item.note || 'Sem observação'), '', 'fornecedor', '<div class="details-actions"><button class="outline" data-action="edit-supplier" data-id="' + esc(item.id) + '">Editar</button><button class="outline danger-button" data-action="delete-supplier" data-id="' + esc(item.id) + '">Excluir</button></div>')).join('') || empty('Nenhum fornecedor cadastrado.');
@@ -3267,6 +3279,16 @@
     save();
     navigate('records:categories');
   }
+  function saveOrderTag(form) {
+    const name = String(control(form, 'name').value || '').trim();
+    const key = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
+    if (!name) { toast('Informe o nome da tag.'); return; }
+    if ((data.orderTags || []).some(tag => tag.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR') === key)) { toast('Esta tag já está cadastrada.'); return; }
+    data.orderTags.push({ id: uid(), name, active: true });
+    save();
+    toast('Tag cadastrada.');
+    navigate('records:tags');
+  }
   function saveMessage(form) {
     data.settings.pixKey = form.elements.pixKey.value.trim();
     data.settings.whatsappTemplate = form.elements.whatsappTemplate.value.trim() || DEFAULT_SETTINGS.whatsappTemplate;
@@ -4192,6 +4214,17 @@
     if (action === 'delete-supplier') { deleteSupplier(id); return; }
     if (action === 'edit-category') { state.editProductCategory = id; state.screen = 'category-edit'; render(); return; }
     if (action === 'delete-category') { deleteCategory(id); return; }
+    if (action === 'toggle-order-tag') {
+      const tag = (data.orderTags || []).find(item => String(item.id) === String(id));
+      if (tag) { tag.active = tag.active === false; save(); render(); }
+      return;
+    }
+    if (action === 'delete-order-tag') {
+      const tag = (data.orderTags || []).find(item => String(item.id) === String(id));
+      if (!tag || !confirm('Excluir a tag "' + tag.name + '"? Pedidos antigos continuarão com o histórico preservado.')) return;
+      data.orderTags = data.orderTags.filter(item => String(item.id) !== String(id));
+      save(); render(); return;
+    }
     if (action === 'clear-filter') { state.reportFilter = { start: '', end: '', min: '', max: '', query: '', payment: '', status: '', location: '', tag: '' }; render(); return; }
     if (action === 'export-xlsx') { exportXlsx(); return; }
     if (action === 'optimize-catalog-images') { optimizeCatalogImages(); return; }
@@ -4354,6 +4387,7 @@
     else if (formId === 'supplierEditForm') saveSupplier(form, true);
     else if (formId === 'categoryForm') saveCategory(form, false);
     else if (formId === 'categoryEditForm') saveCategory(form, true);
+    else if (formId === 'orderTagForm') saveOrderTag(form);
     else if (formId === 'compareForm') { state.compareSupply = form.elements.supplyId.value; state.comparePrice = form.elements.unitPrice.value; state.compareQuantity = form.elements.quantity.value; render(); }
     else if (formId === 'capacityForm') { state.capacityRecipe = form.elements.recipeId.value; render(); }
     else if (formId === 'appearanceForm') saveAppearance(form);

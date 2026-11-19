@@ -25,11 +25,11 @@
     // permaneçam presos aos arquivos de uma versão anterior do cardápio.
     if (!window.Capacitor?.isNativePlatform?.() && 'serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('./service-worker.js?v=78').then(function (registration) {
+        navigator.serviceWorker.register('./service-worker.js?v=79').then(function (registration) {
           registration.update().catch(function () {});
           navigator.serviceWorker.addEventListener('controllerchange', function () {
-            if (sessionStorage.getItem('gelatos-catalog-reloaded-v78')) return;
-            sessionStorage.setItem('gelatos-catalog-reloaded-v78', '1');
+            if (sessionStorage.getItem('gelatos-catalog-reloaded-v79')) return;
+            sessionStorage.setItem('gelatos-catalog-reloaded-v79', '1');
             window.location.reload();
           }, { once: true });
         }).catch(function () {

@@ -31,7 +31,7 @@ const SESSION_DAYS = 30;
 const PBKDF2_ROUNDS = 100_000;
 const STATE_PARTS = [
   'version', 'supplies', 'recipes', 'productions', 'readyStock', 'orders',
-  'expenses', 'suppliers', 'purchases', 'resellers', 'productCategories',
+  'expenses', 'suppliers', 'purchases', 'resellers', 'productCategories', 'orderTags',
   'notifications', 'notificationKeys', 'openingFinancial', 'settings'
 ];
 const encoder = new TextEncoder();
