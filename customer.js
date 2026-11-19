@@ -155,7 +155,11 @@
   function catalogAvailability(now = new Date()) {
     const day = now.getDay();
     const entry = catalog?.catalogHours?.[day] || catalog?.catalogHours?.[String(day)];
-    if (!entry || entry.enabled !== true || !/^\d{2}:\d{2}$/.test(String(entry.open || '')) || !/^\d{2}:\d{2}$/.test(String(entry.close || ''))) return { open: false, label: 'Fechado hoje', detail: 'Pedidos pelo cardápio estão fechados hoje.' };
+    // Empresas que já usavam o cardápio antes deste recurso ainda não têm a
+    // agenda salva. Mantemos o acesso delas aberto até a proprietária definir
+    // horários, para não interromper vendas em uma atualização.
+    if (!entry) return { open: true, label: 'Aberto para pedidos', detail: 'Horários de atendimento em configuração.' };
+    if (entry.enabled !== true || !/^\d{2}:\d{2}$/.test(String(entry.open || '')) || !/^\d{2}:\d{2}$/.test(String(entry.close || ''))) return { open: false, label: 'Fechado hoje', detail: 'Pedidos pelo cardápio estão fechados hoje.' };
     const current = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
     const open = current >= entry.open && current < entry.close;
     return open ? { open: true, label: 'Aberto hoje até ' + entry.close, detail: 'Você pode montar e enviar seu pedido agora.' } : { open: false, label: 'Fechado agora', detail: 'Hoje atendemos das ' + entry.open + ' às ' + entry.close + '.' };
